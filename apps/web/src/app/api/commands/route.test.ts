@@ -1,4 +1,6 @@
+import { and, eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
+import { householdMembers } from "../../../lib/db/schema";
 import { withTestDb } from "../../../lib/db/test";
 import { createHousehold } from "../../../lib/households";
 import { handleCommandsPost } from "./route";
@@ -111,6 +113,104 @@ describe("POST /api/commands", () => {
       ).json();
       expect(done.type).toBe("ok");
       expect(done.spoken).toMatch(/Now /);
+    });
+  });
+
+  it("applies concurrent duplicate command_ids only once", async () => {
+    await withTestDb(async (db) => {
+      const { householdId } = await createHousehold(db, { userId: "owner", name: "H" });
+      const body = {
+        householdId,
+        clientCommandId: "cmd-race",
+        command: {
+          intent: "put_away" as const,
+          itemText: "paper towels",
+          quantity: 1,
+          locationPath: ["basement"],
+        },
+      };
+      const once = () =>
+        handleCommandsPost(
+          new Request("http://localhost/api/commands", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(body),
+          }),
+          { db, getUserId: async () => "owner" },
+        );
+      const [resA, resB] = await Promise.all([once(), once()]);
+      const a = await resA.json();
+      const b = await resB.json();
+      expect(resA.status).toBe(200);
+      expect(resB.status).toBe(200);
+      expect(a).toEqual(b);
+      expect(a.lots[0].quantity).toBe(1);
+    });
+  });
+
+  it("returns 403 for a stored receipt after membership is revoked", async () => {
+    await withTestDb(async (db) => {
+      const { householdId } = await createHousehold(db, { userId: "owner", name: "H" });
+      const body = {
+        householdId,
+        clientCommandId: "cmd-kept",
+        command: {
+          intent: "put_away",
+          itemText: "paper towels",
+          quantity: 1,
+          locationPath: ["basement"],
+        },
+      };
+      const first = await handleCommandsPost(
+        new Request("http://localhost/api/commands", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        }),
+        { db, getUserId: async () => "owner" },
+      );
+      expect(first.status).toBe(200);
+
+      await db
+        .delete(householdMembers)
+        .where(
+          and(eq(householdMembers.householdId, householdId), eq(householdMembers.userId, "owner")),
+        );
+
+      const replay = await handleCommandsPost(
+        new Request("http://localhost/api/commands", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        }),
+        { db, getUserId: async () => "owner" },
+      );
+      expect(replay.status).toBe(403);
+      await expect(replay.json()).resolves.toMatchObject({
+        type: "error",
+        code: "forbidden",
+      });
+    });
+  });
+
+  it("returns voice_unavailable when audio transcription fails", async () => {
+    await withTestDb(async (db) => {
+      const { householdId } = await createHousehold(db, { userId: "owner", name: "H" });
+      const form = new FormData();
+      form.set("householdId", householdId);
+      form.set("clientCommandId", "cmd-audio");
+      form.set("audio", new Blob(["fake"], { type: "audio/webm" }), "clip.webm");
+
+      const res = await handleCommandsPost(
+        new Request("http://localhost/api/commands", { method: "POST", body: form }),
+        { db, getUserId: async () => "owner" },
+      );
+      expect(res.status).toBe(200);
+      await expect(res.json()).resolves.toEqual({
+        type: "error",
+        code: "voice_unavailable",
+        spoken: "Voice is unavailable — type it instead.",
+      });
     });
   });
 });

@@ -14,30 +14,45 @@ export async function withCommandReceipt(
     householdId: string;
     userId: string;
     clientCommandId: string;
-    run: () => Promise<CommandOutcome>;
+    run: (tx: Database) => Promise<CommandOutcome>;
   },
 ): Promise<CommandOutcome> {
-  const [existing] = await db
-    .select({ resultJson: commandReceipts.resultJson })
-    .from(commandReceipts)
-    .where(
-      and(
-        eq(commandReceipts.householdId, householdId),
-        eq(commandReceipts.userId, userId),
-        eq(commandReceipts.clientCommandId, clientCommandId),
-      ),
-    )
-    .limit(1);
-  if (existing) {
-    return JSON.parse(existing.resultJson) as CommandOutcome;
-  }
+  return db.transaction(async (tx) => {
+    const dbTx = tx as unknown as Database;
+    const [claimed] = await tx
+      .insert(commandReceipts)
+      .values({
+        householdId,
+        userId,
+        clientCommandId,
+        resultJson: "",
+      })
+      .onConflictDoNothing()
+      .returning({ id: commandReceipts.id });
 
-  const outcome = await run();
-  await db.insert(commandReceipts).values({
-    householdId,
-    userId,
-    clientCommandId,
-    resultJson: JSON.stringify(outcome),
+    if (!claimed) {
+      const [existing] = await tx
+        .select({ resultJson: commandReceipts.resultJson })
+        .from(commandReceipts)
+        .where(
+          and(
+            eq(commandReceipts.householdId, householdId),
+            eq(commandReceipts.userId, userId),
+            eq(commandReceipts.clientCommandId, clientCommandId),
+          ),
+        )
+        .limit(1);
+      if (!existing) {
+        throw new Error("command receipt missing after conflict");
+      }
+      return JSON.parse(existing.resultJson) as CommandOutcome;
+    }
+
+    const outcome = await run(dbTx);
+    await tx
+      .update(commandReceipts)
+      .set({ resultJson: JSON.stringify(outcome) })
+      .where(eq(commandReceipts.id, claimed.id));
+    return outcome;
   });
-  return outcome;
 }

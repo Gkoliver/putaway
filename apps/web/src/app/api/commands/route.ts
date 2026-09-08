@@ -5,10 +5,13 @@ import {
   type InventoryCommand,
 } from "@putaway/shared";
 import { getDb, type Database } from "../../../lib/db/client";
+import { requireMembership } from "../../../lib/households";
 import { handleCommand } from "../../../lib/inventory/handler";
 import { withCommandReceipt } from "../../../lib/inventory/receipts";
 import { extract } from "../../../lib/openai/extract";
 import { transcribe } from "../../../lib/openai/transcribe";
+
+const VOICE_UNAVAILABLE_SPOKEN = "Voice is unavailable — type it instead.";
 
 export type CommandsPostDeps = {
   db: Database;
@@ -36,11 +39,27 @@ export async function handleCommandsPost(
   }
 
   const payload = await readPayload(req);
+  const membership = await requireMembership(db, userId, payload.householdId);
+  if (!membership) {
+    return Response.json(
+      { type: "error", code: "forbidden", spoken: "You don't have access to that household." },
+      { status: 403 },
+    );
+  }
+
   let command = payload.command;
   let transcript = payload.transcript;
 
   if (!command && payload.audio) {
-    transcript = await transcribe(payload.audio);
+    try {
+      transcript = await transcribe(payload.audio);
+    } catch {
+      return jsonOutcome({
+        type: "error",
+        code: "voice_unavailable",
+        spoken: VOICE_UNAVAILABLE_SPOKEN,
+      });
+    }
   }
 
   if (!command && transcript !== undefined) {
@@ -70,8 +89,8 @@ export async function handleCommandsPost(
     householdId: payload.householdId,
     userId,
     clientCommandId: payload.clientCommandId,
-    run: () =>
-      handleCommand(db, {
+    run: (tx) =>
+      handleCommand(tx, {
         userId,
         householdId: payload.householdId,
         command,
