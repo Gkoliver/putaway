@@ -10,6 +10,7 @@ export type IncrementLotResult = {
 
 export type DecrementLotResult = {
   quantity: number;
+  previousQuantity: number;
   requested: number;
   clamped: boolean;
 };
@@ -144,16 +145,17 @@ export async function decrementLot(
       .limit(1);
 
     if (!existing) {
-      return { quantity: 0, requested: quantity, clamped: true };
+      return { quantity: 0, previousQuantity: 0, requested: quantity, clamped: true };
     }
 
-    const newQty = Math.max(0, existing.quantity - quantity);
-    const clamped = quantity > existing.quantity;
+    const previousQuantity = existing.quantity;
+    const newQty = Math.max(0, previousQuantity - quantity);
+    const clamped = quantity > previousQuantity;
     await tx
       .update(stockLots)
       .set({ quantity: newQty, lastActivityAt: at })
       .where(eq(stockLots.id, existing.id));
-    return { quantity: newQty, requested: quantity, clamped };
+    return { quantity: newQty, previousQuantity, requested: quantity, clamped };
   });
 }
 

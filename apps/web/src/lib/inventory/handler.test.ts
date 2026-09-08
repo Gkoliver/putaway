@@ -171,7 +171,7 @@ describe("handleCommand", () => {
     });
   });
 
-  it("speaks post-decrement quantity 0 on clamped take-out", async () => {
+  it("speaks pre-decrement on-hand on clamped take-out", async () => {
     await withTestDb(async (db) => {
       const { householdId } = await createHousehold(db, { userId: "u1", name: "H" });
       await handleCommand(db, { userId: "u1", householdId, command: putAway({ quantity: 2 }) });
@@ -187,7 +187,7 @@ describe("handleCommand", () => {
       });
       expect(clamped.type).toBe("ok");
       if (clamped.type === "ok") {
-        expect(clamped.spoken).toBe("Only 0 left in Basement. Marked 0.");
+        expect(clamped.spoken).toBe("Only 2 left in Basement. Marked 0.");
         expect(clamped.lots[0].quantity).toBe(0);
       }
     });

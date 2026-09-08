@@ -35,7 +35,7 @@ describe("items and lots", () => {
         quantity: 5,
         at: new Date("2026-09-07T13:00:00Z"),
       });
-      expect(afterTake).toEqual({ quantity: 0, requested: 5, clamped: true });
+      expect(afterTake).toEqual({ quantity: 0, previousQuantity: 2, requested: 5, clamped: true });
       const lots = await listLotsForItem(db, { householdId, itemId: item.itemId, inStockOnly: false });
       expect(lots).toHaveLength(1);
       expect(lots[0].quantity).toBe(0);

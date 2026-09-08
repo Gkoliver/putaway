@@ -232,7 +232,7 @@ async function decrementAt(
   }
   const lots = await snapshots(db, householdId, itemId);
   const spoken = decremented.clamped
-    ? `Only ${decremented.quantity} left in ${pathLabel}. Marked 0.`
+    ? `Only ${decremented.previousQuantity} left in ${pathLabel}. Marked 0.`
     : `Took ${quantity} ${name} from ${pathLabel}. Now ${decremented.quantity}.`;
   return { type: "ok", spoken, itemId, itemName: name, lots };
 }
