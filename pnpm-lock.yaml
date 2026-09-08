@@ -41,6 +41,10 @@ importers:
         version: 3.2.7(@types/node@26.5.0)(tsx@4.23.13)
 
   packages/shared:
+    dependencies:
+      zod:
+        specifier: ^3.25.76
+        version: 3.25.76
     devDependencies:
       typescript:
         specifier: ^5.8.3
@@ -1125,6 +1129,9 @@ packages:
     resolution: {integrity: sha512-LKYU1iAXJXUgAXn9URjiu+MWhyUXHsvfp7mcuYm9dSUKK0/CjtrUwFAxD82/mCWbtLsGjFIad0wIsod4zrTAEQ==}
     engines: {node: '>=0.4'}
 
+  zod@3.25.76:
+    resolution: {integrity: sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==}
+
 snapshots:
 
   '@drizzle-team/brocli@0.10.2': {}
@@ -1897,3 +1904,5 @@ snapshots:
       stackback: 0.0.2
 
   xtend@4.0.2: {}
+
+  zod@3.25.76: {}
