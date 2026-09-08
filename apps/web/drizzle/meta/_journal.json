@@ -8,6 +8,13 @@
       "when": 1788826591006,
       "tag": "0000_typical_lord_hawal",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1788831126872,
+      "tag": "0001_numerous_mister_sinister",
+      "breakpoints": true
     }
   ]
 }

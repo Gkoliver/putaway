@@ -18,7 +18,7 @@ export async function withTestDb(fn: (db: Database) => Promise<void>) {
     await fn(db as unknown as Database);
   } finally {
     await pool.query(`
-      truncate command_receipts, stock_lots, locations, items, invites, household_members, households
+      truncate command_receipts, stock_lots, locations, items, invites, household_members, households, session, account, verification, "user"
       restart identity cascade
     `);
     await pool.end();

@@ -104,8 +104,9 @@ export async function handleCommandsPost(
   return jsonOutcome(outcome);
 }
 
-async function realGetUserId(_req: Request): Promise<string | null> {
-  return null;
+async function realGetUserId(req: Request): Promise<string | null> {
+  const { getUserIdFromRequest } = await import("../../../lib/auth");
+  return getUserIdFromRequest(req);
 }
 
 export async function POST(req: Request): Promise<Response> {
