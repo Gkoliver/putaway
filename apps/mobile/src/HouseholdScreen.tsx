@@ -6,8 +6,15 @@ import { authClient } from "./auth";
 import { useSession } from "./session";
 
 export function HouseholdScreen() {
-  const { apiBase, token, activeHouseholdId, setActiveHouseholdId, refreshToken, signOut } =
-    useSession();
+  const {
+    apiBase,
+    token,
+    activeHouseholdId,
+    setActiveHouseholdId,
+    clearActiveHouseholdId,
+    refreshToken,
+    signOut,
+  } = useSession();
   const [email, setEmail] = useState("");
   const [sent, setSent] = useState(false);
   const [name, setName] = useState("");
@@ -20,16 +27,23 @@ export function HouseholdScreen() {
       return;
     }
     try {
-      const rows = await fetchHouseholds({ apiBase, token });
-      const list = Array.isArray(rows) ? rows : [];
+      const list = await fetchHouseholds({ apiBase, token });
       setHouseholds(list);
-      if (!activeHouseholdId && list[0]) {
+      if (activeHouseholdId && !list.some((row) => row.householdId === activeHouseholdId)) {
+        await clearActiveHouseholdId();
+      } else if (!activeHouseholdId && list[0]) {
         await setActiveHouseholdId(list[0].householdId);
       }
     } catch {
       setError("Could not load households.");
     }
-  }, [apiBase, token, activeHouseholdId, setActiveHouseholdId]);
+  }, [
+    apiBase,
+    token,
+    activeHouseholdId,
+    setActiveHouseholdId,
+    clearActiveHouseholdId,
+  ]);
 
   useEffect(() => {
     void loadHouseholds();
@@ -51,10 +65,15 @@ export function HouseholdScreen() {
 
   async function onCreate() {
     if (!token || !name.trim()) return;
-    const created = await createHousehold({ apiBase, token, name: name.trim() });
-    await setActiveHouseholdId(created.householdId);
-    setName("");
-    await loadHouseholds();
+    setError(null);
+    try {
+      const created = await createHousehold({ apiBase, token, name: name.trim() });
+      await setActiveHouseholdId(created.householdId);
+      setName("");
+      await loadHouseholds();
+    } catch {
+      setError("Could not create household.");
+    }
   }
 
   if (!token) {

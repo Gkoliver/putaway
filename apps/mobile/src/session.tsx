@@ -20,6 +20,7 @@ type SessionValue = {
   activeHouseholdId: string | null;
   ready: boolean;
   setActiveHouseholdId: (id: string) => Promise<void>;
+  clearActiveHouseholdId: () => Promise<void>;
   refreshToken: () => Promise<string | null>;
   signOut: () => Promise<void>;
 };
@@ -57,10 +58,17 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     await SecureStore.setItemAsync(HOUSEHOLD_KEY, id);
   }, []);
 
+  const clearActiveHouseholdId = useCallback(async () => {
+    setHouseholdId(null);
+    await SecureStore.deleteItemAsync(HOUSEHOLD_KEY);
+  }, []);
+
   const signOut = useCallback(async () => {
     await authClient.signOut();
     await SecureStore.deleteItemAsync(TOKEN_KEY);
+    await SecureStore.deleteItemAsync(HOUSEHOLD_KEY);
     setToken(null);
+    setHouseholdId(null);
   }, []);
 
   useEffect(() => {
@@ -88,10 +96,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       activeHouseholdId,
       ready,
       setActiveHouseholdId,
+      clearActiveHouseholdId,
       refreshToken,
       signOut,
     }),
-    [token, activeHouseholdId, ready, setActiveHouseholdId, refreshToken, signOut],
+    [token, activeHouseholdId, ready, setActiveHouseholdId, clearActiveHouseholdId, refreshToken, signOut],
   );
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;

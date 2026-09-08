@@ -82,6 +82,11 @@ export async function fetchHouseholds(input: {
   const res = await fetch(`${input.apiBase}/api/households`, {
     headers: { authorization: `Bearer ${input.token}` },
   });
+  if (!res.ok) {
+    const error = new Error("Could not load households.") as Error & { status: number };
+    error.status = res.status;
+    throw error;
+  }
   return (await res.json()) as HouseholdRow[];
 }
 
@@ -98,6 +103,11 @@ export async function createHousehold(input: {
     },
     body: JSON.stringify({ name: input.name }),
   });
+  if (!res.ok) {
+    const error = new Error("Could not create household.") as Error & { status: number };
+    error.status = res.status;
+    throw error;
+  }
   return (await res.json()) as { householdId: string; role: "owner" };
 }
 
