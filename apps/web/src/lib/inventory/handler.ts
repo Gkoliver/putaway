@@ -13,6 +13,12 @@ import { resolveItem } from "./items";
 import { pathLabelFor, resolveLocationPath } from "./locations";
 import { decrementLot, incrementLot, listLotsForItem, type LotListRow } from "./lots";
 
+class RollbackOutcome extends Error {
+  constructor(readonly outcome: CommandOutcome) {
+    super("rollback");
+  }
+}
+
 export async function handleCommand(
   db: Database,
   input: { userId: string; householdId: string; command: InventoryCommand },
@@ -22,9 +28,18 @@ export async function handleCommand(
     return { type: "error", code: "forbidden", spoken: "You don't have access to that household." };
   }
 
-  return db.transaction(async (tx) =>
-    applyCommand(tx as unknown as Database, input.householdId, input.command),
-  );
+  try {
+    return await db.transaction(async (tx) => {
+      const outcome = await applyCommand(tx as unknown as Database, input.householdId, input.command);
+      if (outcome.type === "error") {
+        throw new RollbackOutcome(outcome);
+      }
+      return outcome;
+    });
+  } catch (error) {
+    if (error instanceof RollbackOutcome) return error.outcome;
+    throw error;
+  }
 }
 
 async function applyCommand(
@@ -207,10 +222,6 @@ async function decrementAt(
     at: Date;
   },
 ): Promise<CommandOutcome> {
-  const before = (await listLotsForItem(db, { householdId, itemId, inStockOnly: false })).find(
-    (lot) => lot.locationId === locationId,
-  );
-  const onHand = before?.quantity ?? 0;
   const lotError = lotQuantityError(quantity);
   if (lotError) return lotError;
   let decremented;
@@ -221,7 +232,7 @@ async function decrementAt(
   }
   const lots = await snapshots(db, householdId, itemId);
   const spoken = decremented.clamped
-    ? `Only ${onHand} left in ${pathLabel}. Marked 0.`
+    ? `Only ${decremented.quantity} left in ${pathLabel}. Marked 0.`
     : `Took ${quantity} ${name} from ${pathLabel}. Now ${decremented.quantity}.`;
   return { type: "ok", spoken, itemId, itemName: name, lots };
 }

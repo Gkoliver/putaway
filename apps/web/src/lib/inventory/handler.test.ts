@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { withTestDb } from "../db/test";
+import { items, locations } from "../db/schema";
 import { createHousehold } from "../households";
 import { handleCommand } from "./handler";
 import type { InventoryCommand } from "@putaway/shared";
@@ -147,6 +148,83 @@ describe("handleCommand", () => {
         command: { intent: "find", itemText: "paper towels", quantity: 1 },
       });
       expect(own).toMatchObject({ type: "error", code: "unknown_item" });
+    });
+  });
+
+  it("does not persist item or location when put-away quantity is 0", async () => {
+    await withTestDb(async (db) => {
+      const { householdId } = await createHousehold(db, { userId: "u1", name: "H" });
+      const failed = await handleCommand(db, {
+        userId: "u1",
+        householdId,
+        command: putAway({ quantity: 0 }),
+      });
+      expect(failed.type).toBe("error");
+      expect(await db.select().from(items)).toHaveLength(0);
+      expect(await db.select().from(locations)).toHaveLength(0);
+      const find = await handleCommand(db, {
+        userId: "u1",
+        householdId,
+        command: { intent: "find", itemText: "paper towels", quantity: 1 },
+      });
+      expect(find).toMatchObject({ type: "error", code: "unknown_item" });
+    });
+  });
+
+  it("speaks post-decrement quantity 0 on clamped take-out", async () => {
+    await withTestDb(async (db) => {
+      const { householdId } = await createHousehold(db, { userId: "u1", name: "H" });
+      await handleCommand(db, { userId: "u1", householdId, command: putAway({ quantity: 2 }) });
+      const clamped = await handleCommand(db, {
+        userId: "u1",
+        householdId,
+        command: {
+          intent: "take_out",
+          itemText: "paper towels",
+          quantity: 5,
+          locationPath: ["basement"],
+        },
+      });
+      expect(clamped.type).toBe("ok");
+      if (clamped.type === "ok") {
+        expect(clamped.spoken).toBe("Only 0 left in Basement. Marked 0.");
+        expect(clamped.lots[0].quantity).toBe(0);
+      }
+    });
+  });
+
+  it("includes lot quantities on ambiguous location path candidates", async () => {
+    await withTestDb(async (db) => {
+      const { householdId } = await createHousehold(db, { userId: "u1", name: "H" });
+      await handleCommand(db, {
+        userId: "u1",
+        householdId,
+        command: putAway({ locationPath: ["Hall closet"], quantity: 4 }),
+      });
+      await handleCommand(db, {
+        userId: "u1",
+        householdId,
+        command: putAway({ locationPath: ["Hall cabinet"], quantity: 8 }),
+      });
+      const asked = await handleCommand(db, {
+        userId: "u1",
+        householdId,
+        command: {
+          intent: "take_out",
+          itemText: "paper towels",
+          quantity: 1,
+          locationPath: ["hall"],
+        },
+      });
+      expect(asked.type).toBe("clarification");
+      if (asked.type === "clarification") {
+        expect(asked.clarification.type).toBe("which_location");
+        if (asked.clarification.type === "which_location") {
+          expect(asked.clarification.candidates.map((c) => c.quantity).sort((a, b) => a - b)).toEqual([
+            4, 8,
+          ]);
+        }
+      }
     });
   });
 });
