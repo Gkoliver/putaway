@@ -47,54 +47,55 @@ export async function handleCommandsPost(
     );
   }
 
-  let command = payload.command;
-  let transcript = payload.transcript;
-
-  if (!command && payload.audio) {
-    try {
-      transcript = await transcribe(payload.audio);
-    } catch {
-      return jsonOutcome({
-        type: "error",
-        code: "voice_unavailable",
-        spoken: VOICE_UNAVAILABLE_SPOKEN,
-      });
-    }
-  }
-
-  if (!command && transcript !== undefined) {
-    const interpreted = await interpretTranscript(transcript, extract);
-    if ("intent" in interpreted && isIntent(interpreted.intent)) {
-      command = interpreted;
-    } else if ("type" in interpreted && interpreted.type === "follow_up") {
-      return jsonOutcome({
-        type: "clarification",
-        spoken: interpreted.message,
-        clarification: { type: "follow_up", message: interpreted.message },
-      });
-    } else if ("type" in interpreted && interpreted.type === "error") {
-      return jsonOutcome(interpreted);
-    }
-  }
-
-  if (!command) {
-    return jsonOutcome({
-      type: "error",
-      code: "not_caught",
-      spoken: "I didn't catch that.",
-    });
-  }
-
   const outcome = await withCommandReceipt(db, {
     householdId: payload.householdId,
     userId,
     clientCommandId: payload.clientCommandId,
-    run: (tx) =>
-      handleCommand(tx, {
+    run: async (tx) => {
+      let command = payload.command;
+      let transcript = payload.transcript;
+
+      if (!command && payload.audio) {
+        try {
+          transcript = await transcribe(payload.audio);
+        } catch {
+          return {
+            type: "error",
+            code: "voice_unavailable",
+            spoken: VOICE_UNAVAILABLE_SPOKEN,
+          } as const;
+        }
+      }
+
+      if (!command && transcript !== undefined) {
+        const interpreted = await interpretTranscript(transcript, extract);
+        if ("intent" in interpreted && isIntent(interpreted.intent)) {
+          command = interpreted;
+        } else if ("type" in interpreted && interpreted.type === "follow_up") {
+          return {
+            type: "clarification",
+            spoken: interpreted.message,
+            clarification: { type: "follow_up", message: interpreted.message },
+          };
+        } else if ("type" in interpreted && interpreted.type === "error") {
+          return interpreted;
+        }
+      }
+
+      if (!command) {
+        return {
+          type: "error",
+          code: "not_caught",
+          spoken: "I didn't catch that.",
+        };
+      }
+
+      return handleCommand(tx, {
         userId,
         householdId: payload.householdId,
         command,
-      }),
+      });
+    },
   });
 
   if (outcome.type === "error" && outcome.code === "forbidden") {
