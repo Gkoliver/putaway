@@ -70,11 +70,13 @@ export async function createInvite(
 export async function acceptInvite(
   db: Database,
   { token, userId, email }: { token: string; userId: string; email: string },
-): Promise<{ householdId: string } | { error: "expired" | "already_used" | "email_mismatch" }> {
+): Promise<
+  { householdId: string } | { error: "expired" | "already_used" | "email_mismatch" | "not_found" }
+> {
   return db.transaction(async (tx) => {
     const [invite] = await tx.select().from(invites).where(eq(invites.token, token)).limit(1);
     if (!invite) {
-      throw new Error("invite not found");
+      return { error: "not_found" as const };
     }
     if (invite.acceptedAt) {
       return { error: "already_used" as const };

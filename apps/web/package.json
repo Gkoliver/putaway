@@ -11,9 +11,11 @@
     "@putaway/shared": "workspace:*",
     "better-auth": "^1.7.3",
     "drizzle-orm": "^0.44.5",
-    "next": "^16.3.4",
+    "next": "^15.5.25",
     "openai": "^7.10.0",
-    "pg": "^8.16.3"
+    "pg": "^8.16.3",
+    "react": "19.2.3",
+    "react-dom": "19.2.3"
   },
   "devDependencies": {
     "@types/pg": "^8.15.5",

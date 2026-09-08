@@ -10,12 +10,17 @@ const dbUrl =
   process.env.TEST_DATABASE_URL ??
   "postgresql://putaway:putaway@localhost:5432/putaway";
 
+const secret = process.env.BETTER_AUTH_SECRET;
+if (!secret) {
+  throw new Error("BETTER_AUTH_SECRET is required");
+}
+
 export const auth = betterAuth({
   database: drizzleAdapter(getDb(dbUrl), {
     provider: "pg",
     schema,
   }),
-  secret: process.env.BETTER_AUTH_SECRET ?? "dev-only-better-auth-secret",
+  secret,
   baseURL: process.env.BETTER_AUTH_URL ?? "http://localhost:3000",
   plugins: [
     magicLink({

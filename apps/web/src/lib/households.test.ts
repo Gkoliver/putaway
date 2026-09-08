@@ -67,6 +67,18 @@ describe("households", () => {
     });
   });
 
+  it("rejects an unknown invite token", async () => {
+    await withTestDb(async (db) => {
+      expect(
+        await acceptInvite(db, {
+          token: randomUUID(),
+          userId: "user-b",
+          email: "brother@example.com",
+        }),
+      ).toEqual({ error: "not_found" });
+    });
+  });
+
   it("rejects an invite when the email does not match", async () => {
     await withTestDb(async (db) => {
       const owner = "user-a";
