@@ -90,11 +90,15 @@ export async function handleCommandsPost(
         };
       }
 
-      return handleCommand(tx, {
+      const result = await handleCommand(tx, {
         userId,
         householdId: payload.householdId,
         command,
       });
+      if (result.type === "clarification") {
+        return { ...result, command };
+      }
+      return result;
     },
   });
 

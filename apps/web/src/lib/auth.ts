@@ -1,3 +1,4 @@
+import { expo } from "@better-auth/expo";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { nextCookies } from "better-auth/next-js";
@@ -22,7 +23,13 @@ export const auth = betterAuth({
   }),
   secret,
   baseURL: process.env.BETTER_AUTH_URL ?? "http://localhost:3000",
+  trustedOrigins: [
+    "putaway://",
+    "putaway://*",
+    ...(process.env.NODE_ENV === "production" ? [] : ["exp://", "exp://**"]),
+  ],
   plugins: [
+    expo(),
     magicLink({
       sendMagicLink: async ({ email, url }) => {
         if (process.env.NODE_ENV !== "production") {

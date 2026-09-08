@@ -1,0 +1,26 @@
+{
+  "cli": {
+    "version": ">= 16.17.4",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "preview": {
+      "channel": "preview",
+      "ios": {
+        "distribution": "store"
+      },
+      "android": {
+        "distribution": "internal"
+      }
+    }
+  },
+  "submit": {
+    "preview": {
+      "ios": {},
+      "android": {
+        "track": "internal",
+        "releaseStatus": "draft"
+      }
+    }
+  }
+}

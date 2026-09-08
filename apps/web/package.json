@@ -8,6 +8,7 @@
   },
   "dependencies": {
     "@better-auth/drizzle-adapter": "^1.7.3",
+    "@better-auth/expo": "^1.7.3",
     "@putaway/shared": "workspace:*",
     "better-auth": "^1.7.3",
     "drizzle-orm": "^0.45.2",
