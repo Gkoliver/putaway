@@ -18,6 +18,12 @@ const RESUBMIT_ERROR: CommandOutcome = {
   spoken: "Could not apply that choice. Try again.",
 };
 
+const REQUEST_ERROR: CommandOutcome = {
+  type: "error",
+  code: "not_caught",
+  spoken: "Something went wrong. Try again.",
+};
+
 export function TalkScreen() {
   const { apiBase, token, activeHouseholdId } = useSession();
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
@@ -68,6 +74,8 @@ export function TalkScreen() {
         command,
       });
       applyOutcome(next, command);
+    } catch {
+      setOutcome(REQUEST_ERROR);
     } finally {
       setBusy(false);
     }
@@ -85,6 +93,8 @@ export function TalkScreen() {
         transcript: text,
       });
       applyOutcome(next);
+    } catch {
+      setOutcome(REQUEST_ERROR);
     } finally {
       setBusy(false);
     }
@@ -138,6 +148,8 @@ export function TalkScreen() {
         audioUri: uri,
       });
       applyOutcome(next);
+    } catch {
+      setOutcome(REQUEST_ERROR);
     } finally {
       setBusy(false);
     }

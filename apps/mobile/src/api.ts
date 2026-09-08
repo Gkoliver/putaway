@@ -1,5 +1,14 @@
 import type { CommandOutcome, InventoryCommand } from "@putaway/shared";
 
+async function parseCommandResponse(res: Response): Promise<CommandOutcome> {
+  if (!res.ok) {
+    const error = new Error("Something went wrong. Try again.") as Error & { status: number };
+    error.status = res.status;
+    throw error;
+  }
+  return (await res.json()) as CommandOutcome;
+}
+
 export async function submitCommand(input: {
   apiBase: string;
   token: string;
@@ -21,7 +30,7 @@ export async function submitCommand(input: {
       command: input.command,
     }),
   });
-  return (await res.json()) as CommandOutcome;
+  return parseCommandResponse(res);
 }
 
 export async function submitAudio(input: {
@@ -49,7 +58,7 @@ export async function submitAudio(input: {
     },
     body: form,
   });
-  return (await res.json()) as CommandOutcome;
+  return parseCommandResponse(res);
 }
 
 export type HouseholdRow = {
