@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import type { Database } from "../db/client";
 import { items, locations, stockLots } from "../db/schema";
 import { requireMembership } from "../households";
@@ -49,25 +49,23 @@ async function loadPair(
   householdId: string,
   sourceLocationId: string,
   targetLocationId: string,
+  options?: { lock?: boolean },
 ) {
   if (sourceLocationId === targetLocationId) return { error: invalidMerge() };
 
-  const [source] = await db
+  const query = db
     .select()
     .from(locations)
-    .where(eq(locations.id, sourceLocationId))
-    .limit(1);
-  const [target] = await db
-    .select()
-    .from(locations)
-    .where(eq(locations.id, targetLocationId))
-    .limit(1);
+    .where(inArray(locations.id, [sourceLocationId, targetLocationId]));
+  const rows = options?.lock ? await query.for("update") : await query;
+  const source = rows.find((row) => row.id === sourceLocationId);
+  const target = rows.find((row) => row.id === targetLocationId);
 
   if (!source || !target) return { error: invalidMerge() };
   if (source.householdId !== householdId || target.householdId !== householdId) {
     return { error: invalidMerge() };
   }
-  if (source.archivedAt) return { error: invalidMerge() };
+  if (source.archivedAt || target.archivedAt) return { error: invalidMerge() };
   return { source, target };
 }
 
@@ -129,17 +127,23 @@ export async function applyMerge(db: Database, input: MergeInput): Promise<Apply
       input.householdId,
       input.sourceLocationId,
       input.targetLocationId,
+      { lock: true },
     );
     if ("error" in pair) return pair.error;
 
     const { source, target } = pair;
-    const sourceLots = await tx.select().from(stockLots).where(eq(stockLots.locationId, source.id));
+    const sourceLots = await tx
+      .select()
+      .from(stockLots)
+      .where(eq(stockLots.locationId, source.id))
+      .for("update");
 
     for (const sourceLot of sourceLots) {
       const [targetLot] = await tx
         .select()
         .from(stockLots)
         .where(and(eq(stockLots.locationId, target.id), eq(stockLots.itemId, sourceLot.itemId)))
+        .for("update")
         .limit(1);
 
       if (targetLot) {

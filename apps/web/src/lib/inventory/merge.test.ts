@@ -4,7 +4,7 @@ import { withTestDb } from "../db/test";
 import { createHousehold, createInvite, acceptInvite } from "../households";
 import { handleCommand } from "./handler";
 import { applyMerge, previewMerge } from "./merge";
-import { locations, stockLots } from "../db/schema";
+import { items, locations, stockLots } from "../db/schema";
 
 describe("merge", () => {
   it("combines lots and archives the source", async () => {
@@ -192,6 +192,93 @@ describe("merge", () => {
       expect(reused?.archivedAt).not.toBeNull();
       expect(created).toBeDefined();
       expect(created?.archivedAt).toBeNull();
+    });
+  });
+
+  it("rejects merge into an archived target", async () => {
+    await withTestDb(async (db) => {
+      const { householdId } = await createHousehold(db, { userId: "owner", name: "H" });
+      await handleCommand(db, {
+        userId: "owner",
+        householdId,
+        command: { intent: "put_away", itemText: "tape", quantity: 1, locationPath: ["downstairs"] },
+      });
+      await handleCommand(db, {
+        userId: "owner",
+        householdId,
+        command: { intent: "put_away", itemText: "tape", quantity: 1, locationPath: ["basement"] },
+      });
+      const nodes = await db.select().from(locations);
+      const source = nodes.find((n) => n.name.toLowerCase() === "downstairs")!;
+      const target = nodes.find((n) => n.name.toLowerCase() === "basement")!;
+      await db.update(locations).set({ archivedAt: new Date() }).where(eq(locations.id, target.id));
+
+      const preview = await previewMerge(db, {
+        userId: "owner",
+        householdId,
+        sourceLocationId: source.id,
+        targetLocationId: target.id,
+      });
+      expect(preview).toMatchObject({ ok: false, code: "invalid_merge" });
+
+      const applied = await applyMerge(db, {
+        userId: "owner",
+        householdId,
+        sourceLocationId: source.id,
+        targetLocationId: target.id,
+      });
+      expect(applied).toMatchObject({ ok: false, code: "invalid_merge" });
+      const [src] = await db.select().from(locations).where(eq(locations.id, source.id));
+      expect(src.archivedAt).toBeNull();
+      const sourceLots = await db.select().from(stockLots).where(eq(stockLots.locationId, source.id));
+      expect(sourceLots).toHaveLength(1);
+    });
+  });
+
+  it("moves a unique-item lot to the target", async () => {
+    await withTestDb(async (db) => {
+      const { householdId } = await createHousehold(db, { userId: "owner", name: "H" });
+      await handleCommand(db, {
+        userId: "owner",
+        householdId,
+        command: { intent: "put_away", itemText: "nails", quantity: 4, locationPath: ["downstairs"] },
+      });
+      await handleCommand(db, {
+        userId: "owner",
+        householdId,
+        command: { intent: "put_away", itemText: "tape", quantity: 1, locationPath: ["basement"] },
+      });
+      const nodes = await db.select().from(locations);
+      const source = nodes.find((n) => n.name.toLowerCase() === "downstairs")!;
+      const target = nodes.find((n) => n.name.toLowerCase() === "basement")!;
+      const [nails] = await db.select().from(items).where(eq(items.name, "Nails"));
+      const [sourceLot] = await db.select().from(stockLots).where(eq(stockLots.itemId, nails.id));
+      expect(sourceLot.locationId).toBe(source.id);
+
+      const preview = await previewMerge(db, {
+        userId: "owner",
+        householdId,
+        sourceLocationId: source.id,
+        targetLocationId: target.id,
+      });
+      expect(preview.ok).toBe(true);
+      if (preview.ok) {
+        expect(preview.lots).toEqual([
+          { itemName: "Nails", sourceQty: 4, targetQty: 0, mergedQty: 4 },
+        ]);
+      }
+
+      const applied = await applyMerge(db, {
+        userId: "owner",
+        householdId,
+        sourceLocationId: source.id,
+        targetLocationId: target.id,
+      });
+      expect(applied).toEqual({ ok: true });
+      const [moved] = await db.select().from(stockLots).where(eq(stockLots.id, sourceLot.id));
+      expect(moved.locationId).toBe(target.id);
+      expect(moved.quantity).toBe(4);
+      expect(await db.select().from(stockLots).where(eq(stockLots.locationId, source.id))).toHaveLength(0);
     });
   });
 });
