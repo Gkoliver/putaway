@@ -16,7 +16,7 @@ describe("resolveLocationPath", () => {
       });
       expect(created.ok).toBe(true);
       if (!created.ok) return;
-      expect(await pathLabelFor(db, created.locationId)).toBe(
+      expect(await pathLabelFor(db, householdId, created.locationId)).toBe(
         "Basement → Metal shelves → Shelf A",
       );
     });
@@ -63,7 +63,7 @@ describe("resolveLocationPath", () => {
       expect(created.ok).toBe(true);
       if (!created.ok) return;
       expect(created.pathLabel).toBe("TV Closet");
-      expect(await pathLabelFor(db, created.locationId)).toBe("TV Closet");
+      expect(await pathLabelFor(db, householdId, created.locationId)).toBe("TV Closet");
     });
   });
 

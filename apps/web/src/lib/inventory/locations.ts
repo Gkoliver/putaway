@@ -33,11 +33,19 @@ function titleCase(segment: string): string {
     .join(" ");
 }
 
-export async function pathLabelFor(db: Database, locationId: string): Promise<string> {
+export async function pathLabelFor(
+  db: Database,
+  householdId: string,
+  locationId: string,
+): Promise<string> {
   const names: string[] = [];
   let currentId: string | null = locationId;
   while (currentId) {
-    const [row] = await db.select().from(locations).where(eq(locations.id, currentId)).limit(1);
+    const [row] = await db
+      .select()
+      .from(locations)
+      .where(and(eq(locations.id, currentId), eq(locations.householdId, householdId)))
+      .limit(1);
     if (!row) break;
     names.unshift(row.name);
     currentId = row.parentId;
@@ -116,7 +124,7 @@ export async function resolveLocationPath(
     const candidates = await Promise.all(
       matches.map(async (match) => ({
         locationId: match.id,
-        pathLabel: await pathLabelFor(db, match.id),
+        pathLabel: await pathLabelFor(db, householdId, match.id),
       })),
     );
     return {
@@ -127,6 +135,6 @@ export async function resolveLocationPath(
     };
   }
 
-  const pathLabel = await pathLabelFor(db, locationId);
+  const pathLabel = await pathLabelFor(db, householdId, locationId);
   return { ok: true, locationId, pathLabel };
 }

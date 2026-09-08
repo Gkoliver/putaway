@@ -38,12 +38,15 @@ async function requireOwnedItemAndLocation(
     throw new Error("item does not belong to household");
   }
   const [location] = await db
-    .select({ id: locations.id })
+    .select({ id: locations.id, archivedAt: locations.archivedAt })
     .from(locations)
     .where(and(eq(locations.id, locationId), eq(locations.householdId, householdId)))
     .limit(1);
   if (!location) {
     throw new Error("location does not belong to household");
+  }
+  if (location.archivedAt) {
+    throw new Error("location is archived");
   }
 }
 
@@ -183,7 +186,7 @@ export async function listLotsForItem(
       quantity: row.quantity,
       putAwayCount: row.putAwayCount,
       lastActivityAt: row.lastActivityAt,
-      pathLabel: await pathLabelFor(db, row.locationId),
+      pathLabel: await pathLabelFor(db, householdId, row.locationId),
       archived: false,
     })),
   );
