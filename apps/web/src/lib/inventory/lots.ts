@@ -23,11 +23,10 @@ export type LotListRow = {
   archived: boolean;
 };
 
-async function requireOwnedItemAndLocation(
+async function requireOwnedItem(
   db: Database,
   householdId: string,
   itemId: string,
-  locationId: string,
 ): Promise<void> {
   const [item] = await db
     .select({ id: items.id })
@@ -37,10 +36,18 @@ async function requireOwnedItemAndLocation(
   if (!item) {
     throw new Error("item does not belong to household");
   }
-  const [location] = await db
+}
+
+async function lockAndRequireActiveLocation(
+  tx: Database,
+  householdId: string,
+  locationId: string,
+): Promise<void> {
+  const [location] = await tx
     .select({ id: locations.id, archivedAt: locations.archivedAt })
     .from(locations)
     .where(and(eq(locations.id, locationId), eq(locations.householdId, householdId)))
+    .for("update")
     .limit(1);
   if (!location) {
     throw new Error("location does not belong to household");
@@ -73,28 +80,32 @@ export async function incrementLot(
   },
 ): Promise<IncrementLotResult> {
   requirePositiveQuantity(quantity);
-  await requireOwnedItemAndLocation(db, householdId, itemId, locationId);
+  await requireOwnedItem(db, householdId, itemId);
 
-  const [row] = await db
-    .insert(stockLots)
-    .values({
-      householdId,
-      itemId,
-      locationId,
-      quantity,
-      putAwayCount: 1,
-      lastActivityAt: at,
-    })
-    .onConflictDoUpdate({
-      target: [stockLots.householdId, stockLots.itemId, stockLots.locationId],
-      set: {
-        quantity: sql`${stockLots.quantity} + ${quantity}`,
-        putAwayCount: sql`${stockLots.putAwayCount} + 1`,
+  return db.transaction(async (tx) => {
+    await lockAndRequireActiveLocation(tx, householdId, locationId);
+
+    const [row] = await tx
+      .insert(stockLots)
+      .values({
+        householdId,
+        itemId,
+        locationId,
+        quantity,
+        putAwayCount: 1,
         lastActivityAt: at,
-      },
-    })
-    .returning();
-  return { quantity: row.quantity, putAwayCount: row.putAwayCount };
+      })
+      .onConflictDoUpdate({
+        target: [stockLots.householdId, stockLots.itemId, stockLots.locationId],
+        set: {
+          quantity: sql`${stockLots.quantity} + ${quantity}`,
+          putAwayCount: sql`${stockLots.putAwayCount} + 1`,
+          lastActivityAt: at,
+        },
+      })
+      .returning();
+    return { quantity: row.quantity, putAwayCount: row.putAwayCount };
+  });
 }
 
 export async function decrementLot(
@@ -114,9 +125,11 @@ export async function decrementLot(
   },
 ): Promise<DecrementLotResult> {
   requirePositiveQuantity(quantity);
-  await requireOwnedItemAndLocation(db, householdId, itemId, locationId);
+  await requireOwnedItem(db, householdId, itemId);
 
   return db.transaction(async (tx) => {
+    await lockAndRequireActiveLocation(tx, householdId, locationId);
+
     const [existing] = await tx
       .select()
       .from(stockLots)
