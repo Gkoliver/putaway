@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import type { Database } from "./db/client";
 import { householdMembers, households, invites } from "./db/schema";
 
@@ -9,13 +9,15 @@ export async function createHousehold(
   db: Database,
   { userId, name }: { userId: string; name: string },
 ): Promise<{ householdId: string; role: "owner" }> {
-  const [household] = await db.insert(households).values({ name }).returning();
-  await db.insert(householdMembers).values({
-    householdId: household.id,
-    userId,
-    role: "owner",
+  return db.transaction(async (tx) => {
+    const [household] = await tx.insert(households).values({ name }).returning();
+    await tx.insert(householdMembers).values({
+      householdId: household.id,
+      userId,
+      role: "owner",
+    });
+    return { householdId: household.id, role: "owner" };
   });
-  return { householdId: household.id, role: "owner" };
 }
 
 export async function requireMembership(
@@ -69,24 +71,33 @@ export async function acceptInvite(
   db: Database,
   { token, userId, email }: { token: string; userId: string; email: string },
 ): Promise<{ householdId: string } | { error: "expired" | "already_used" | "email_mismatch" }> {
-  const [invite] = await db.select().from(invites).where(eq(invites.token, token)).limit(1);
-  if (!invite) {
-    throw new Error("invite not found");
-  }
-  if (invite.acceptedAt) {
-    return { error: "already_used" };
-  }
-  if (invite.expiresAt.getTime() < Date.now()) {
-    return { error: "expired" };
-  }
-  if (invite.email.toLowerCase() !== email.toLowerCase()) {
-    return { error: "email_mismatch" };
-  }
-  await db.insert(householdMembers).values({
-    householdId: invite.householdId,
-    userId,
-    role: invite.role,
+  return db.transaction(async (tx) => {
+    const [invite] = await tx.select().from(invites).where(eq(invites.token, token)).limit(1);
+    if (!invite) {
+      throw new Error("invite not found");
+    }
+    if (invite.acceptedAt) {
+      return { error: "already_used" as const };
+    }
+    if (invite.expiresAt.getTime() < Date.now()) {
+      return { error: "expired" as const };
+    }
+    if (invite.email.toLowerCase() !== email.toLowerCase()) {
+      return { error: "email_mismatch" as const };
+    }
+    const [claimed] = await tx
+      .update(invites)
+      .set({ acceptedAt: new Date() })
+      .where(and(eq(invites.id, invite.id), isNull(invites.acceptedAt)))
+      .returning();
+    if (!claimed) {
+      return { error: "already_used" as const };
+    }
+    await tx.insert(householdMembers).values({
+      householdId: invite.householdId,
+      userId,
+      role: invite.role,
+    });
+    return { householdId: invite.householdId };
   });
-  await db.update(invites).set({ acceptedAt: new Date() }).where(eq(invites.id, invite.id));
-  return { householdId: invite.householdId };
 }

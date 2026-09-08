@@ -49,4 +49,59 @@ describe("households", () => {
       ).toEqual({ error: "expired" });
     });
   });
+
+  it("rejects an already used invite", async () => {
+    await withTestDb(async (db) => {
+      const owner = "user-a";
+      const { householdId } = await createHousehold(db, { userId: owner, name: "Oliver house" });
+      const { token } = await createInvite(db, {
+        householdId,
+        email: "brother@example.com",
+        role: "member",
+        createdByUserId: owner,
+      });
+      await acceptInvite(db, { token, userId: "user-b", email: "brother@example.com" });
+      expect(
+        await acceptInvite(db, { token, userId: "user-c", email: "brother@example.com" }),
+      ).toEqual({ error: "already_used" });
+    });
+  });
+
+  it("rejects an invite when the email does not match", async () => {
+    await withTestDb(async (db) => {
+      const owner = "user-a";
+      const { householdId } = await createHousehold(db, { userId: owner, name: "Oliver house" });
+      const { token } = await createInvite(db, {
+        householdId,
+        email: "brother@example.com",
+        role: "member",
+        createdByUserId: owner,
+      });
+      expect(
+        await acceptInvite(db, { token, userId: "user-b", email: "other@example.com" }),
+      ).toEqual({ error: "email_mismatch" });
+    });
+  });
+
+  it("rejects createInvite from a non-owner", async () => {
+    await withTestDb(async (db) => {
+      const owner = "user-a";
+      const { householdId } = await createHousehold(db, { userId: owner, name: "Oliver house" });
+      const { token } = await createInvite(db, {
+        householdId,
+        email: "brother@example.com",
+        role: "member",
+        createdByUserId: owner,
+      });
+      await acceptInvite(db, { token, userId: "user-b", email: "brother@example.com" });
+      await expect(
+        createInvite(db, {
+          householdId,
+          email: "cousin@example.com",
+          role: "member",
+          createdByUserId: "user-b",
+        }),
+      ).rejects.toThrow("only owners can create invites");
+    });
+  });
 });
