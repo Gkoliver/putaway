@@ -2,6 +2,7 @@ import { getDb } from "../../../lib/db/client";
 import { listLocationTree } from "../../../lib/inventory/queries";
 import { loadHouseholdState } from "../household-state";
 import { applyMergeAction, moveLocationAction, previewMergeAction, renameLocationAction } from "./actions";
+import { LocationTree } from "./location-tree";
 import { MergeForm } from "./merge-form";
 
 export default async function LocationsPage({
@@ -20,9 +21,10 @@ export default async function LocationsPage({
   return (
     <main>
       <h1>Locations</h1>
-      <ul>
-        {tree.map((node) => (
-          <li key={node.id}>
+      <LocationTree
+        nodes={tree}
+        renderNode={(node) => (
+          <>
             <span>{node.pathLabel}</span>
             {canEdit ? (
               <>
@@ -55,9 +57,9 @@ export default async function LocationsPage({
                 </form>
               </>
             ) : null}
-          </li>
-        ))}
-      </ul>
+          </>
+        )}
+      />
       {canEdit ? (
         <MergeForm
           householdId={household.id}

@@ -48,7 +48,7 @@ export async function pathLabelFor(
       .where(and(eq(locations.id, currentId), eq(locations.householdId, householdId)))
       .limit(1);
     if (!row) break;
-    names.unshift(row.name);
+    if (!row.archivedAt) names.unshift(row.name);
     currentId = row.parentId;
   }
   return names.join(" → ");

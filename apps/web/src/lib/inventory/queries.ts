@@ -63,13 +63,28 @@ export async function listLocationTree(
       id: locations.id,
       parentId: locations.parentId,
       name: locations.name,
+      archivedAt: locations.archivedAt,
     })
     .from(locations)
-    .where(and(eq(locations.householdId, householdId), isNull(locations.archivedAt)));
+    .where(eq(locations.householdId, householdId));
 
+  const byId = new Map(rows.map((row) => [row.id, row]));
+
+  function hasArchivedAncestor(id: string): boolean {
+    let current = byId.get(id);
+    while (current) {
+      if (current.archivedAt) return true;
+      current = current.parentId ? byId.get(current.parentId) : undefined;
+    }
+    return false;
+  }
+
+  const visible = rows.filter((row) => !hasArchivedAncestor(row.id));
   const labeled = await Promise.all(
-    rows.map(async (row) => ({
-      ...row,
+    visible.map(async (row) => ({
+      id: row.id,
+      parentId: row.parentId,
+      name: row.name,
       pathLabel: await pathLabelFor(db, householdId, row.id),
     })),
   );
