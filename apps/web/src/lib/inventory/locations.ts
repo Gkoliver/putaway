@@ -2,6 +2,7 @@ import { and, eq, isNull } from "drizzle-orm";
 import { bestMatches, namesMatch } from "@putaway/shared";
 import type { Database } from "../db/client";
 import { locations } from "../db/schema";
+import { requireMembership } from "../households";
 
 export type LocationResolveOk = {
   ok: true;
@@ -137,4 +138,136 @@ export async function resolveLocationPath(
 
   const pathLabel = await pathLabelFor(db, householdId, locationId);
   return { ok: true, locationId, pathLabel };
+}
+
+export type LocationWriteFail = {
+  ok: false;
+  code: "forbidden" | "archived" | "duplicate_name" | "invalid_parent";
+};
+
+export type LocationWriteResult = { ok: true } | LocationWriteFail;
+
+async function requireOwner(
+  db: Database,
+  userId: string,
+  householdId: string,
+): Promise<LocationWriteFail | null> {
+  const membership = await requireMembership(db, userId, householdId);
+  if (!membership || membership.role !== "owner") {
+    return { ok: false, code: "forbidden" };
+  }
+  return null;
+}
+
+async function loadOwnedLocation(
+  db: Database,
+  householdId: string,
+  locationId: string,
+) {
+  const [row] = await db
+    .select()
+    .from(locations)
+    .where(and(eq(locations.id, locationId), eq(locations.householdId, householdId)))
+    .limit(1);
+  return row ?? null;
+}
+
+async function hasSiblingName(
+  db: Database,
+  householdId: string,
+  parentId: string | null,
+  name: string,
+  exceptId: string,
+): Promise<boolean> {
+  const siblings = await loadSiblings(db, householdId, parentId);
+  const lower = name.toLowerCase();
+  return siblings.some((sibling) => sibling.id !== exceptId && sibling.name.toLowerCase() === lower);
+}
+
+async function wouldCycle(
+  db: Database,
+  householdId: string,
+  locationId: string,
+  newParentId: string,
+): Promise<boolean> {
+  let currentId: string | null = newParentId;
+  const seen = new Set<string>();
+  while (currentId) {
+    if (currentId === locationId) return true;
+    if (seen.has(currentId)) return true;
+    seen.add(currentId);
+    const [row] = await db
+      .select({ parentId: locations.parentId })
+      .from(locations)
+      .where(and(eq(locations.id, currentId), eq(locations.householdId, householdId)))
+      .limit(1);
+    if (!row) break;
+    currentId = row.parentId;
+  }
+  return false;
+}
+
+export async function renameLocation(
+  db: Database,
+  {
+    userId,
+    householdId,
+    locationId,
+    name,
+  }: { userId: string; householdId: string; locationId: string; name: string },
+): Promise<LocationWriteResult> {
+  const auth = await requireOwner(db, userId, householdId);
+  if (auth) return auth;
+
+  const row = await loadOwnedLocation(db, householdId, locationId);
+  if (!row) return { ok: false, code: "forbidden" };
+  if (row.archivedAt) return { ok: false, code: "archived" };
+
+  const trimmed = name.trim();
+  if (!trimmed) return { ok: false, code: "duplicate_name" };
+  if (await hasSiblingName(db, householdId, row.parentId, trimmed, locationId)) {
+    return { ok: false, code: "duplicate_name" };
+  }
+
+  await db
+    .update(locations)
+    .set({ name: trimmed, updatedAt: new Date() })
+    .where(eq(locations.id, locationId));
+  return { ok: true };
+}
+
+export async function moveLocation(
+  db: Database,
+  {
+    userId,
+    householdId,
+    locationId,
+    newParentId,
+  }: { userId: string; householdId: string; locationId: string; newParentId: string | null },
+): Promise<LocationWriteResult> {
+  const auth = await requireOwner(db, userId, householdId);
+  if (auth) return auth;
+
+  const row = await loadOwnedLocation(db, householdId, locationId);
+  if (!row) return { ok: false, code: "forbidden" };
+  if (row.archivedAt) return { ok: false, code: "archived" };
+
+  if (newParentId) {
+    const parent = await loadOwnedLocation(db, householdId, newParentId);
+    if (!parent) return { ok: false, code: "invalid_parent" };
+    if (parent.archivedAt) return { ok: false, code: "archived" };
+    if (await wouldCycle(db, householdId, locationId, newParentId)) {
+      return { ok: false, code: "invalid_parent" };
+    }
+  }
+
+  if (await hasSiblingName(db, householdId, newParentId, row.name, locationId)) {
+    return { ok: false, code: "duplicate_name" };
+  }
+
+  await db
+    .update(locations)
+    .set({ parentId: newParentId, updatedAt: new Date() })
+    .where(eq(locations.id, locationId));
+  return { ok: true };
 }

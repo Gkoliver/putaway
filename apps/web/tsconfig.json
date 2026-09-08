@@ -1,4 +1,9 @@
 {
   "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "jsx": "preserve",
+    "lib": ["dom", "ES2022"],
+    "noEmit": true
+  },
   "include": ["src"]
 }
