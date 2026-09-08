@@ -1,9 +1,11 @@
+import { useRouter } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { fetchInventory, type InventoryRow } from "./api";
 import { useSession } from "./session";
 
 export function InventoryList() {
+  const router = useRouter();
   const { apiBase, token, activeHouseholdId } = useSession();
   const [rows, setRows] = useState<InventoryRow[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -17,10 +19,20 @@ export function InventoryList() {
     try {
       const next = await fetchInventory({ apiBase, token, householdId: activeHouseholdId });
       setRows(Array.isArray(next) ? next : []);
-    } catch {
-      setError("Could not load inventory.");
+    } catch (err) {
+      setRows([]);
+      const status =
+        err && typeof err === "object" && "status" in err && typeof err.status === "number"
+          ? err.status
+          : undefined;
+      if (status === 401 || status === 403) {
+        setError("Pick a household first.");
+        router.push("/household");
+      } else {
+        setError("Could not load inventory.");
+      }
     }
-  }, [apiBase, token, activeHouseholdId]);
+  }, [apiBase, token, activeHouseholdId, router]);
 
   useEffect(() => {
     void load();

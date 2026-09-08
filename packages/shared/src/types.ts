@@ -52,6 +52,7 @@ export type CommandClarification = {
   type: "clarification";
   spoken: string;
   clarification: Clarification;
+  command?: InventoryCommand;
 };
 
 export type CommandErrorCode =

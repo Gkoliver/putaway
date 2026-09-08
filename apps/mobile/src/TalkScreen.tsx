@@ -12,18 +12,18 @@ import { submitAudio, submitCommand } from "./api";
 import { ClarificationPicker } from "./ClarificationPicker";
 import { useSession } from "./session";
 
-function commandFromOutcome(outcome: CommandOutcome): InventoryCommand | undefined {
-  if (outcome.type !== "clarification") return undefined;
-  if ("command" in outcome && outcome.command && typeof outcome.command === "object") {
-    return outcome.command as InventoryCommand;
-  }
-  return undefined;
-}
+const RESUBMIT_ERROR: CommandOutcome = {
+  type: "error",
+  code: "not_caught",
+  spoken: "Could not apply that choice. Try again.",
+};
 
 export function TalkScreen() {
   const { apiBase, token, activeHouseholdId } = useSession();
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const pendingCommand = useRef<InventoryCommand | null>(null);
+  const holdActiveRef = useRef(false);
+  const preparePromiseRef = useRef<Promise<void> | null>(null);
   const [outcome, setOutcome] = useState<CommandOutcome | null>(null);
   const [showText, setShowText] = useState(false);
   const [transcript, setTranscript] = useState("");
@@ -44,8 +44,7 @@ export function TalkScreen() {
 
   function applyOutcome(next: CommandOutcome, command?: InventoryCommand) {
     setOutcome(next);
-    const fromServer = commandFromOutcome(next);
-    if (fromServer) pendingCommand.current = fromServer;
+    if (next.type === "clarification" && next.command) pendingCommand.current = next.command;
     else if (command) pendingCommand.current = command;
     if (next.type === "ok") pendingCommand.current = null;
     if (next.type === "error" && (next.code === "voice_unavailable" || next.code === "empty_transcript")) {
@@ -92,18 +91,32 @@ export function TalkScreen() {
   }
 
   async function onHoldStart() {
-    try {
-      await recorder.prepareToRecordAsync();
+    holdActiveRef.current = true;
+    const prepare = recorder.prepareToRecordAsync().then(() => {
       recorder.record();
-      setRecording(true);
+    });
+    preparePromiseRef.current = prepare;
+    try {
+      await prepare;
+      if (holdActiveRef.current) setRecording(true);
     } catch {
+      holdActiveRef.current = false;
       setShowText(true);
     }
   }
 
   async function onHoldEnd() {
-    if (!recording) return;
+    if (!holdActiveRef.current && !preparePromiseRef.current) return;
+    holdActiveRef.current = false;
     setRecording(false);
+    try {
+      if (preparePromiseRef.current) await preparePromiseRef.current;
+    } catch {
+      preparePromiseRef.current = null;
+      setShowText(true);
+      return;
+    }
+    preparePromiseRef.current = null;
     try {
       await recorder.stop();
     } catch {
@@ -154,12 +167,18 @@ export function TalkScreen() {
           clarification={clarification}
           onChooseLocation={(locationId) => {
             const base = pendingCommand.current;
-            if (!base) return;
+            if (!base) {
+              setOutcome(RESUBMIT_ERROR);
+              return;
+            }
             void sendCommand({ ...base, locationId });
           }}
           onChooseItem={(itemId) => {
             const base = pendingCommand.current;
-            if (!base) return;
+            if (!base) {
+              setOutcome(RESUBMIT_ERROR);
+              return;
+            }
             void sendCommand({ ...base, itemId });
           }}
         />

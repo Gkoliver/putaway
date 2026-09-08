@@ -100,5 +100,14 @@ export async function fetchInventory(input: {
   const res = await fetch(`${input.apiBase}/api/households/${input.householdId}/inventory`, {
     headers: { authorization: `Bearer ${input.token}` },
   });
+  if (!res.ok) {
+    const error = new Error(
+      res.status === 401 || res.status === 403
+        ? "Pick a household first."
+        : "Could not load inventory.",
+    ) as Error & { status: number };
+    error.status = res.status;
+    throw error;
+  }
   return (await res.json()) as InventoryRow[];
 }
