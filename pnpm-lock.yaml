@@ -17,6 +17,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@putaway/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
       drizzle-orm:
         specifier: ^0.44.5
         version: 0.44.7(@types/pg@8.23.1)(pg@8.23.0)
