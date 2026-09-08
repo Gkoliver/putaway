@@ -23,6 +23,7 @@ function titleCase(segment: string): string {
     .trim()
     .split(/\s+/)
     .map((word, index) => {
+      if (/[A-Z]/.test(word)) return word;
       const lower = word.toLowerCase();
       if (index === 0 || lower.length === 1) {
         return lower.charAt(0).toUpperCase() + lower.slice(1);
@@ -69,6 +70,15 @@ export async function resolveLocationPath(
     create,
   }: { householdId: string; segments: string[]; create: boolean },
 ): Promise<LocationResolveResult> {
+  if (segments.length === 0 || segments.some((segment) => !segment.trim())) {
+    const spokenSeg = segments.find((segment) => !segment.trim()) ?? "";
+    return {
+      ok: false,
+      code: "unknown_location",
+      spoken: `I don't have a place called ${spokenSeg}.`,
+    };
+  }
+
   let parentId: string | null = null;
   let locationId = "";
 
