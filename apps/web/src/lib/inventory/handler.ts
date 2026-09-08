@@ -36,7 +36,7 @@ async function applyCommand(
   const item = await resolveCommandItem(db, householdId, command, create);
   if (item.type !== "resolved") return item;
 
-  const location = await resolveCommandLocation(db, householdId, command, create);
+  const location = await resolveCommandLocation(db, householdId, command, create, item.itemId);
   if (location && location.type !== "resolved") return location;
 
   const at = new Date();
@@ -45,13 +45,23 @@ async function applyCommand(
     if (!location || location.type !== "resolved") {
       return unknownLocation(command.locationPath?.[0] ?? "that place");
     }
-    const incremented = await incrementLot(db, {
-      householdId,
-      itemId: item.itemId,
-      locationId: location.locationId,
-      quantity: command.quantity,
-      at,
-    });
+    const lotError = lotQuantityError(command.quantity);
+    if (lotError) return lotError;
+    let incremented;
+    try {
+      incremented = await incrementLot(db, {
+        householdId,
+        itemId: item.itemId,
+        locationId: location.locationId,
+        quantity: command.quantity,
+        at,
+      });
+    } catch (error) {
+      return mapLotWriteError(error, {
+        segment: command.locationPath?.[0] ?? location.pathLabel,
+        itemText: command.itemText,
+      });
+    }
     const lots = await snapshots(db, householdId, item.itemId);
     return {
       type: "ok",
@@ -201,7 +211,14 @@ async function decrementAt(
     (lot) => lot.locationId === locationId,
   );
   const onHand = before?.quantity ?? 0;
-  const decremented = await decrementLot(db, { householdId, itemId, locationId, quantity, at });
+  const lotError = lotQuantityError(quantity);
+  if (lotError) return lotError;
+  let decremented;
+  try {
+    decremented = await decrementLot(db, { householdId, itemId, locationId, quantity, at });
+  } catch (error) {
+    return mapLotWriteError(error, { segment: pathLabel, itemText: name });
+  }
   const lots = await snapshots(db, householdId, itemId);
   const spoken = decremented.clamped
     ? `Only ${onHand} left in ${pathLabel}. Marked 0.`
@@ -250,6 +267,7 @@ async function resolveCommandLocation(
   householdId: string,
   command: InventoryCommand,
   create: boolean,
+  itemId: string,
 ): Promise<
   | { type: "resolved"; locationId: string; pathLabel: string }
   | CommandOutcome
@@ -282,10 +300,12 @@ async function resolveCommandLocation(
     return { type: "resolved", locationId: resolved.locationId, pathLabel: resolved.pathLabel };
   }
   if (resolved.code === "ambiguous_location") {
+    const lots = await listLotsForItem(db, { householdId, itemId, inStockOnly: false });
+    const qtyByLocation = new Map(lots.map((lot) => [lot.locationId, lot.quantity]));
     const candidates: LocationCandidate[] = (resolved.candidates ?? []).map((candidate) => ({
       locationId: candidate.locationId,
       pathLabel: candidate.pathLabel,
-      quantity: 0,
+      quantity: qtyByLocation.get(candidate.locationId) ?? 0,
     }));
     return {
       type: "clarification",
@@ -318,4 +338,32 @@ async function snapshots(db: Database, householdId: string, itemId: string): Pro
 
 function unknownLocation(segment: string): CommandOutcome {
   return { type: "error", code: "unknown_location", spoken: `I don't have a place called ${segment}.` };
+}
+
+function lotQuantityError(quantity: number): CommandOutcome | undefined {
+  if (quantity <= 0) {
+    return { type: "error", code: "not_caught", spoken: "I didn't catch that." };
+  }
+  return undefined;
+}
+
+function mapLotWriteError(
+  error: unknown,
+  context: { segment?: string; itemText?: string },
+): CommandOutcome {
+  const message = error instanceof Error ? error.message : String(error);
+  if (message === "quantity must be positive") {
+    return { type: "error", code: "not_caught", spoken: "I didn't catch that." };
+  }
+  if (message === "location is archived" || message === "location does not belong to household") {
+    return unknownLocation(context.segment ?? "that place");
+  }
+  if (message === "item does not belong to household") {
+    return {
+      type: "error",
+      code: "unknown_item",
+      spoken: `I don't have ${context.itemText ?? "that"} yet.`,
+    };
+  }
+  throw error;
 }
