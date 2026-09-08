@@ -47,12 +47,15 @@ export async function createInvite(
   }: {
     householdId: string;
     email: string;
-    role: "owner" | "member";
+    role: string;
     createdByUserId: string;
     expiresAt?: Date;
   },
 ): Promise<{ token: string }> {
   const membership = await requireMembership(db, createdByUserId, householdId);
+  if (role !== "owner" && role !== "member") {
+    throw new Error("invalid invite role");
+  }
   if (membership?.role !== "owner") {
     throw new Error("only owners can create invites");
   }

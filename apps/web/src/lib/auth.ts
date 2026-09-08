@@ -25,9 +25,7 @@ export const auth = betterAuth({
   plugins: [
     magicLink({
       sendMagicLink: async ({ email, url }) => {
-        if (process.env.NODE_ENV !== "production") {
-          console.log(`Magic link for ${email}: ${url}`);
-        }
+        console.log(`Magic link for ${email}: ${url}`);
       },
     }),
     bearer(),

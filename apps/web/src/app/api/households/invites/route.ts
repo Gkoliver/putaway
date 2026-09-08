@@ -17,8 +17,11 @@ export async function handleInvitesPost(
   const { householdId, email, role } = (await req.json()) as {
     householdId: string;
     email: string;
-    role: "owner" | "member";
+    role: unknown;
   };
+  if (role !== "owner" && role !== "member") {
+    return Response.json({ error: "invalid_role" }, { status: 400 });
+  }
   try {
     const result = await createInvite(db, {
       householdId,

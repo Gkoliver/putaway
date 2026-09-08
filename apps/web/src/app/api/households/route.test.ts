@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { withTestDb } from "../../../lib/db/test";
+import { acceptInvite, createHousehold, createInvite } from "../../../lib/households";
+import { handleInvitesPost } from "./invites/route";
 import { handleHouseholdsPost } from "./route";
 
 describe("POST /api/households", () => {
@@ -30,6 +32,54 @@ describe("POST /api/households", () => {
         { db, getUserId: async () => null },
       );
       expect(res.status).toBe(401);
+    });
+  });
+});
+
+describe("POST /api/households/invites", () => {
+  it("returns 403 when a non-owner creates an invite", async () => {
+    await withTestDb(async (db) => {
+      const { householdId } = await createHousehold(db, { userId: "user-a", name: "Oliver house" });
+      const { token } = await createInvite(db, {
+        householdId,
+        email: "brother@example.com",
+        role: "member",
+        createdByUserId: "user-a",
+      });
+      await acceptInvite(db, { token, userId: "user-b", email: "brother@example.com" });
+
+      const res = await handleInvitesPost(
+        new Request("http://localhost/api/households/invites", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            householdId,
+            email: "cousin@example.com",
+            role: "member",
+          }),
+        }),
+        { db, getUserId: async () => "user-b" },
+      );
+      expect(res.status).toBe(403);
+    });
+  });
+
+  it("returns 400 when role is not owner or member", async () => {
+    await withTestDb(async (db) => {
+      const { householdId } = await createHousehold(db, { userId: "user-a", name: "Oliver house" });
+      const res = await handleInvitesPost(
+        new Request("http://localhost/api/households/invites", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            householdId,
+            email: "guest@example.com",
+            role: "admin",
+          }),
+        }),
+        { db, getUserId: async () => "user-a" },
+      );
+      expect(res.status).toBe(400);
     });
   });
 });
