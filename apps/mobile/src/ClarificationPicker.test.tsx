@@ -23,4 +23,21 @@ describe("ClarificationPicker", () => {
     fireEvent.press(screen.getByText("Kitchen (4)"));
     expect(onChooseLocation).toHaveBeenCalledWith("k");
   });
+
+  it("does not fire callbacks while disabled", () => {
+    const onChooseLocation = vi.fn();
+    render(
+      <ClarificationPicker
+        clarification={{
+          type: "which_location",
+          candidates: [{ locationId: "k", pathLabel: "Kitchen", quantity: 4 }],
+        }}
+        disabled
+        onChooseLocation={onChooseLocation}
+        onChooseItem={vi.fn()}
+      />,
+    );
+    fireEvent.press(screen.getByText("Kitchen (4)"));
+    expect(onChooseLocation).not.toHaveBeenCalled();
+  });
 });

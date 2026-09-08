@@ -30,6 +30,7 @@ export function TalkScreen() {
   const pendingCommand = useRef<InventoryCommand | null>(null);
   const holdActiveRef = useRef(false);
   const preparePromiseRef = useRef<Promise<void> | null>(null);
+  const busyRef = useRef(false);
   const [outcome, setOutcome] = useState<CommandOutcome | null>(null);
   const [showText, setShowText] = useState(false);
   const [transcript, setTranscript] = useState("");
@@ -61,9 +62,20 @@ export function TalkScreen() {
     }
   }
 
-  async function sendCommand(command: InventoryCommand) {
-    if (!token || !activeHouseholdId) return;
+  function beginBusy() {
+    if (busyRef.current) return false;
+    busyRef.current = true;
     setBusy(true);
+    return true;
+  }
+
+  function endBusy() {
+    busyRef.current = false;
+    setBusy(false);
+  }
+
+  async function sendCommand(command: InventoryCommand) {
+    if (!token || !activeHouseholdId || !beginBusy()) return;
     try {
       pendingCommand.current = command;
       const next = await submitCommand({
@@ -77,13 +89,12 @@ export function TalkScreen() {
     } catch {
       setOutcome(REQUEST_ERROR);
     } finally {
-      setBusy(false);
+      endBusy();
     }
   }
 
   async function sendTranscript(text: string) {
-    if (!token || !activeHouseholdId) return;
-    setBusy(true);
+    if (!token || !activeHouseholdId || !beginBusy()) return;
     try {
       const next = await submitCommand({
         apiBase,
@@ -96,11 +107,12 @@ export function TalkScreen() {
     } catch {
       setOutcome(REQUEST_ERROR);
     } finally {
-      setBusy(false);
+      endBusy();
     }
   }
 
   async function onHoldStart() {
+    if (busyRef.current) return;
     holdActiveRef.current = true;
     const prepare = recorder.prepareToRecordAsync().then(() => {
       recorder.record();
@@ -138,7 +150,7 @@ export function TalkScreen() {
       setShowText(true);
       return;
     }
-    setBusy(true);
+    if (!beginBusy()) return;
     try {
       const next = await submitAudio({
         apiBase,
@@ -151,7 +163,7 @@ export function TalkScreen() {
     } catch {
       setOutcome(REQUEST_ERROR);
     } finally {
-      setBusy(false);
+      endBusy();
     }
   }
 
@@ -163,6 +175,7 @@ export function TalkScreen() {
       {token && !activeHouseholdId ? <Text>Pick a household first.</Text> : null}
       <Pressable
         accessibilityLabel="Hold to talk"
+        disabled={busy}
         onPressIn={() => void onHoldStart()}
         onPressOut={() => void onHoldEnd()}
       >
@@ -177,7 +190,9 @@ export function TalkScreen() {
       {clarification ? (
         <ClarificationPicker
           clarification={clarification}
+          disabled={busy}
           onChooseLocation={(locationId) => {
+            if (busyRef.current) return;
             const base = pendingCommand.current;
             if (!base) {
               setOutcome(RESUBMIT_ERROR);
@@ -186,6 +201,7 @@ export function TalkScreen() {
             void sendCommand({ ...base, locationId });
           }}
           onChooseItem={(itemId) => {
+            if (busyRef.current) return;
             const base = pendingCommand.current;
             if (!base) {
               setOutcome(RESUBMIT_ERROR);
@@ -203,7 +219,7 @@ export function TalkScreen() {
             value={transcript}
             onChangeText={setTranscript}
           />
-          <Pressable onPress={() => void sendTranscript(transcript)}>
+          <Pressable disabled={busy} onPress={() => void sendTranscript(transcript)}>
             <Text>Send</Text>
           </Pressable>
         </View>

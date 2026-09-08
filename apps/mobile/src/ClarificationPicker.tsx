@@ -3,17 +3,22 @@ import type { Clarification } from "@putaway/shared";
 
 export function ClarificationPicker(props: {
   clarification: Clarification;
+  disabled?: boolean;
   onChooseLocation: (locationId: string) => void;
   onChooseItem: (itemId: string) => void;
 }) {
-  const { clarification } = props;
+  const { clarification, disabled = false } = props;
   if (clarification.type === "which_location") {
     return (
       <View>
         {clarification.candidates.map((c) => (
           <Pressable
             key={c.locationId}
-            onPress={() => props.onChooseLocation(c.locationId)}
+            disabled={disabled}
+            onPress={() => {
+              if (disabled) return;
+              props.onChooseLocation(c.locationId);
+            }}
           >
             <Text>{`${c.pathLabel} (${c.quantity})`}</Text>
           </Pressable>
@@ -25,7 +30,14 @@ export function ClarificationPicker(props: {
     return (
       <View>
         {clarification.candidates.map((c) => (
-          <Pressable key={c.itemId} onPress={() => props.onChooseItem(c.itemId)}>
+          <Pressable
+            key={c.itemId}
+            disabled={disabled}
+            onPress={() => {
+              if (disabled) return;
+              props.onChooseItem(c.itemId);
+            }}
+          >
             <Text>{c.name}</Text>
           </Pressable>
         ))}

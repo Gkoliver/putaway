@@ -9,7 +9,16 @@ function Text(props) {
 }
 
 function Pressable(props) {
-  return React.createElement("Pressable", props, props.children);
+  const { disabled, onPress, ...rest } = props;
+  return React.createElement(
+    "Pressable",
+    {
+      ...rest,
+      disabled,
+      onPress: disabled ? undefined : onPress,
+    },
+    props.children,
+  );
 }
 
 function flatten(style) {
