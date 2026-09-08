@@ -1,7 +1,10 @@
 {
   "$schema": "https://turbo.build/schema.json",
   "tasks": {
-    "test": { "dependsOn": ["^test"] },
+    "test": {
+      "dependsOn": ["^test"],
+      "env": ["TEST_DATABASE_URL", "BETTER_AUTH_SECRET"]
+    },
     "dev": { "cache": false, "persistent": true },
     "lint": {}
   }
