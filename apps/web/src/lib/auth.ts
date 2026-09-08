@@ -25,7 +25,33 @@ export const auth = betterAuth({
   plugins: [
     magicLink({
       sendMagicLink: async ({ email, url }) => {
-        console.log(`Magic link for ${email}: ${url}`);
+        if (process.env.NODE_ENV !== "production") {
+          console.log(`Magic link for ${email}: ${url}`);
+          return;
+        }
+        if (!process.env.RESEND_API_KEY) {
+          throw new Error(
+            "Magic link email is not configured for production. Set RESEND_API_KEY.",
+          );
+        }
+        const from =
+          process.env.RESEND_FROM ?? "Put Away <onboarding@resend.dev>";
+        const res = await fetch("https://api.resend.com/emails", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            from,
+            to: [email],
+            subject: "Sign in to Put Away",
+            html: `<p><a href="${url}">Sign in to Put Away</a></p>`,
+          }),
+        });
+        if (!res.ok) {
+          throw new Error(`Failed to send magic link email (${res.status})`);
+        }
       },
     }),
     bearer(),
