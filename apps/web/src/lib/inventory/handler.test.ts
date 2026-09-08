@@ -1,0 +1,152 @@
+import { describe, expect, it } from "vitest";
+import { withTestDb } from "../db/test";
+import { createHousehold } from "../households";
+import { handleCommand } from "./handler";
+import type { InventoryCommand } from "@putaway/shared";
+
+const putAway = (overrides: Partial<InventoryCommand> = {}): InventoryCommand => ({
+  intent: "put_away",
+  itemText: "paper towels",
+  quantity: 1,
+  locationPath: ["basement"],
+  ...overrides,
+});
+
+describe("handleCommand", () => {
+  it("puts away twice and increments", async () => {
+    await withTestDb(async (db) => {
+      const { householdId } = await createHousehold(db, { userId: "u1", name: "H" });
+      const first = await handleCommand(db, { userId: "u1", householdId, command: putAway() });
+      const second = await handleCommand(db, {
+        userId: "u1",
+        householdId,
+        command: putAway({ quantity: 2 }),
+      });
+      expect(first.type).toBe("ok");
+      expect(second.type).toBe("ok");
+      if (second.type === "ok") {
+        expect(second.spoken).toContain("Now 3");
+        expect(second.lots[0].quantity).toBe(3);
+      }
+    });
+  });
+
+  it("asks which location when take-out is ambiguous", async () => {
+    await withTestDb(async (db) => {
+      const { householdId } = await createHousehold(db, { userId: "u1", name: "H" });
+      await handleCommand(db, {
+        userId: "u1",
+        householdId,
+        command: putAway({ locationPath: ["kitchen"], quantity: 4 }),
+      });
+      await handleCommand(db, {
+        userId: "u1",
+        householdId,
+        command: putAway({ locationPath: ["basement"], quantity: 8 }),
+      });
+      const asked = await handleCommand(db, {
+        userId: "u1",
+        householdId,
+        command: { intent: "take_out", itemText: "paper towels", quantity: 2 },
+      });
+      expect(asked.type).toBe("clarification");
+      if (asked.type === "clarification") {
+        expect(asked.clarification.type).toBe("which_location");
+        expect(asked.clarification.type === "which_location" && asked.clarification.candidates).toHaveLength(2);
+      }
+    });
+  });
+
+  it("keeps a zero lot and find falls back to usual place", async () => {
+    await withTestDb(async (db) => {
+      const { householdId } = await createHousehold(db, { userId: "u1", name: "H" });
+      await handleCommand(db, { userId: "u1", householdId, command: putAway({ quantity: 1 }) });
+      const loc = await handleCommand(db, {
+        userId: "u1",
+        householdId,
+        command: { intent: "take_out", itemText: "paper towels", quantity: 1, locationPath: ["basement"] },
+      });
+      expect(loc.type).toBe("ok");
+      const find = await handleCommand(db, {
+        userId: "u1",
+        householdId,
+        command: { intent: "find", itemText: "paper towels", quantity: 1 },
+      });
+      expect(find.type).toBe("ok");
+      if (find.type === "ok") expect(find.spoken).toMatch(/You're out/i);
+    });
+  });
+
+  it("ranks find_usual by put_away_count", async () => {
+    await withTestDb(async (db) => {
+      const { householdId } = await createHousehold(db, { userId: "u1", name: "H" });
+      await handleCommand(db, {
+        userId: "u1",
+        householdId,
+        command: putAway({ locationPath: ["kitchen"], quantity: 1 }),
+      });
+      await handleCommand(db, {
+        userId: "u1",
+        householdId,
+        command: putAway({ locationPath: ["basement"], quantity: 1 }),
+      });
+      await handleCommand(db, {
+        userId: "u1",
+        householdId,
+        command: putAway({ locationPath: ["basement"], quantity: 1 }),
+      });
+      const usual = await handleCommand(db, {
+        userId: "u1",
+        householdId,
+        command: { intent: "find_usual", itemText: "paper towels", quantity: 1 },
+      });
+      expect(usual.type).toBe("ok");
+      if (usual.type === "ok") expect(usual.spoken.toLowerCase()).toContain("basement");
+    });
+  });
+
+  it("asks which item when names are ambiguous", async () => {
+    await withTestDb(async (db) => {
+      const { householdId } = await createHousehold(db, { userId: "u1", name: "H" });
+      await handleCommand(db, {
+        userId: "u1",
+        householdId,
+        command: putAway({ itemText: "paper towels", locationPath: ["kitchen"] }),
+      });
+      await handleCommand(db, {
+        userId: "u1",
+        householdId,
+        command: putAway({ itemText: "bath towels", locationPath: ["bathroom"] }),
+      });
+      const asked = await handleCommand(db, {
+        userId: "u1",
+        householdId,
+        command: { intent: "find", itemText: "towels", quantity: 1 },
+      });
+      expect(asked.type).toBe("clarification");
+      if (asked.type === "clarification") {
+        expect(asked.clarification.type).toBe("which_item");
+      }
+    });
+  });
+
+  it("hides household A data from user B", async () => {
+    await withTestDb(async (db) => {
+      const a = await createHousehold(db, { userId: "u1", name: "A" });
+      const b = await createHousehold(db, { userId: "u2", name: "B" });
+      await handleCommand(db, { userId: "u1", householdId: a.householdId, command: putAway() });
+      const peek = await handleCommand(db, {
+        userId: "u2",
+        householdId: a.householdId,
+        command: { intent: "find", itemText: "paper towels", quantity: 1 },
+      });
+      expect(peek).toMatchObject({ type: "error", code: "forbidden" });
+      const own = await handleCommand(db, {
+        userId: "u2",
+        householdId: b.householdId,
+        command: { intent: "find", itemText: "paper towels", quantity: 1 },
+      });
+      expect(own).toMatchObject({ type: "error", code: "unknown_item" });
+    });
+  });
+});
