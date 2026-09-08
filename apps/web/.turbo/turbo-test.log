@@ -1,0 +1,14 @@
+
+> @putaway/web@0.0.0 test /Users/germaineoliver/Projects/put-away/apps/web
+> vitest run
+
+
+ RUN  v3.2.7 /Users/germaineoliver/Projects/put-away/apps/web
+
+ ✓ src/lib/db/schema.test.ts (1 test) 86ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed (1)
+   Start at  20:18:02
+   Duration  469ms (transform 24ms, setup 0ms, collect 236ms, tests 86ms, environment 0ms, prepare 33ms)
+

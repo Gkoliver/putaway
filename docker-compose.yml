@@ -1,0 +1,12 @@
+services:
+  postgres:
+    image: postgres:16
+    ports: ["5432:5432"]
+    environment:
+      POSTGRES_USER: putaway
+      POSTGRES_PASSWORD: putaway
+      POSTGRES_DB: putaway
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+volumes:
+  pgdata:
