@@ -1,6 +1,6 @@
 import { and, eq, gt, isNull, sql } from "drizzle-orm";
 import type { Database } from "../db/client";
-import { locations, stockLots } from "../db/schema";
+import { items, locations, stockLots } from "../db/schema";
 import { pathLabelFor } from "./locations";
 
 export type IncrementLotResult = {
@@ -23,6 +23,36 @@ export type LotListRow = {
   archived: boolean;
 };
 
+async function requireOwnedItemAndLocation(
+  db: Database,
+  householdId: string,
+  itemId: string,
+  locationId: string,
+): Promise<void> {
+  const [item] = await db
+    .select({ id: items.id })
+    .from(items)
+    .where(and(eq(items.id, itemId), eq(items.householdId, householdId)))
+    .limit(1);
+  if (!item) {
+    throw new Error("item does not belong to household");
+  }
+  const [location] = await db
+    .select({ id: locations.id })
+    .from(locations)
+    .where(and(eq(locations.id, locationId), eq(locations.householdId, householdId)))
+    .limit(1);
+  if (!location) {
+    throw new Error("location does not belong to household");
+  }
+}
+
+function requirePositiveQuantity(quantity: number): void {
+  if (quantity <= 0) {
+    throw new Error("quantity must be positive");
+  }
+}
+
 export async function incrementLot(
   db: Database,
   {
@@ -39,6 +69,9 @@ export async function incrementLot(
     at: Date;
   },
 ): Promise<IncrementLotResult> {
+  requirePositiveQuantity(quantity);
+  await requireOwnedItemAndLocation(db, householdId, itemId, locationId);
+
   const [row] = await db
     .insert(stockLots)
     .values({
@@ -77,29 +110,35 @@ export async function decrementLot(
     at: Date;
   },
 ): Promise<DecrementLotResult> {
-  const [existing] = await db
-    .select()
-    .from(stockLots)
-    .where(
-      and(
-        eq(stockLots.householdId, householdId),
-        eq(stockLots.itemId, itemId),
-        eq(stockLots.locationId, locationId),
-      ),
-    )
-    .limit(1);
+  requirePositiveQuantity(quantity);
+  await requireOwnedItemAndLocation(db, householdId, itemId, locationId);
 
-  if (!existing) {
-    return { quantity: 0, requested: quantity, clamped: true };
-  }
+  return db.transaction(async (tx) => {
+    const [existing] = await tx
+      .select()
+      .from(stockLots)
+      .where(
+        and(
+          eq(stockLots.householdId, householdId),
+          eq(stockLots.itemId, itemId),
+          eq(stockLots.locationId, locationId),
+        ),
+      )
+      .for("update")
+      .limit(1);
 
-  const newQty = Math.max(0, existing.quantity - quantity);
-  const clamped = quantity > existing.quantity;
-  await db
-    .update(stockLots)
-    .set({ quantity: newQty, lastActivityAt: at })
-    .where(eq(stockLots.id, existing.id));
-  return { quantity: newQty, requested: quantity, clamped };
+    if (!existing) {
+      return { quantity: 0, requested: quantity, clamped: true };
+    }
+
+    const newQty = Math.max(0, existing.quantity - quantity);
+    const clamped = quantity > existing.quantity;
+    await tx
+      .update(stockLots)
+      .set({ quantity: newQty, lastActivityAt: at })
+      .where(eq(stockLots.id, existing.id));
+    return { quantity: newQty, requested: quantity, clamped };
+  });
 }
 
 export async function listLotsForItem(
@@ -110,6 +149,15 @@ export async function listLotsForItem(
     inStockOnly,
   }: { householdId: string; itemId: string; inStockOnly: boolean },
 ): Promise<LotListRow[]> {
+  const [item] = await db
+    .select({ id: items.id })
+    .from(items)
+    .where(and(eq(items.id, itemId), eq(items.householdId, householdId)))
+    .limit(1);
+  if (!item) {
+    throw new Error("item does not belong to household");
+  }
+
   const rows = await db
     .select({
       locationId: stockLots.locationId,
@@ -123,6 +171,7 @@ export async function listLotsForItem(
       and(
         eq(stockLots.householdId, householdId),
         eq(stockLots.itemId, itemId),
+        eq(locations.householdId, householdId),
         isNull(locations.archivedAt),
         inStockOnly ? gt(stockLots.quantity, 0) : undefined,
       ),
