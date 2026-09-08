@@ -10,6 +10,7 @@ import {
 import * as Linking from "expo-linking";
 import * as SecureStore from "expo-secure-store";
 import { apiBase, authClient } from "./auth";
+import { applyAuthCallbackUrl, importCookieFromInitialUrl } from "./sessionAuth";
 
 const TOKEN_KEY = "putaway.bearerToken";
 const HOUSEHOLD_KEY = "putaway.activeHouseholdId";
@@ -77,14 +78,18 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       if (storedHousehold) setHouseholdId(storedHousehold);
       const storedToken = await SecureStore.getItemAsync(TOKEN_KEY);
       if (storedToken) setToken(storedToken);
+      await importCookieFromInitialUrl(() => Linking.getInitialURL(), SecureStore);
       await refreshToken();
       setReady(true);
     })();
   }, [refreshToken]);
 
   useEffect(() => {
-    const sub = Linking.addEventListener("url", () => {
-      void refreshToken();
+    const sub = Linking.addEventListener("url", (event) => {
+      void (async () => {
+        await applyAuthCallbackUrl(event.url, SecureStore);
+        await refreshToken();
+      })();
     });
     return () => sub.remove();
   }, [refreshToken]);

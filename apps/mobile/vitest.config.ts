@@ -2,6 +2,9 @@ import { defineConfig } from "vitest/config";
 import { fileURLToPath } from "node:url";
 
 const reactNativeStub = fileURLToPath(new URL("./react-native-stub.cjs", import.meta.url));
+const expoClientStub = fileURLToPath(
+  new URL("./better-auth-expo-client-stub.ts", import.meta.url),
+);
 
 export default defineConfig({
   esbuild: {
@@ -10,6 +13,7 @@ export default defineConfig({
   resolve: {
     alias: {
       "react-native": reactNativeStub,
+      "@better-auth/expo/client": expoClientStub,
     },
   },
   test: {
@@ -19,6 +23,7 @@ export default defineConfig({
     setupFiles: ["./vitest.setup.ts"],
     alias: {
       "react-native": reactNativeStub,
+      "@better-auth/expo/client": expoClientStub,
     },
   },
 });

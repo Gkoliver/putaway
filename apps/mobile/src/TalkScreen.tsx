@@ -11,6 +11,7 @@ import type { CommandOutcome, InventoryCommand } from "@putaway/shared";
 import { submitAudio, submitCommand } from "./api";
 import { ClarificationPicker } from "./ClarificationPicker";
 import { useSession } from "./session";
+import { createTalkLock } from "./talkLock";
 
 const RESUBMIT_ERROR: CommandOutcome = {
   type: "error",
@@ -30,12 +31,15 @@ export function TalkScreen() {
   const pendingCommand = useRef<InventoryCommand | null>(null);
   const holdActiveRef = useRef(false);
   const preparePromiseRef = useRef<Promise<void> | null>(null);
-  const busyRef = useRef(false);
+  const lockRef = useRef(createTalkLock());
   const [outcome, setOutcome] = useState<CommandOutcome | null>(null);
   const [showText, setShowText] = useState(false);
   const [transcript, setTranscript] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [talkPhase, setTalkPhase] = useState(lockRef.current.phase);
   const [recording, setRecording] = useState(false);
+  const mutationsLocked = talkPhase !== "idle";
+  const holdControlDisabled = talkPhase === "uploading";
+  const busy = talkPhase === "uploading";
 
   useEffect(() => {
     void (async () => {
@@ -62,20 +66,13 @@ export function TalkScreen() {
     }
   }
 
-  function beginBusy() {
-    if (busyRef.current) return false;
-    busyRef.current = true;
-    setBusy(true);
-    return true;
-  }
-
-  function endBusy() {
-    busyRef.current = false;
-    setBusy(false);
+  function syncLock() {
+    setTalkPhase(lockRef.current.phase);
   }
 
   async function sendCommand(command: InventoryCommand) {
-    if (!token || !activeHouseholdId || !beginBusy()) return;
+    if (!token || !activeHouseholdId || !lockRef.current.tryStartMutation()) return;
+    syncLock();
     try {
       pendingCommand.current = command;
       const next = await submitCommand({
@@ -89,12 +86,14 @@ export function TalkScreen() {
     } catch {
       setOutcome(REQUEST_ERROR);
     } finally {
-      endBusy();
+      lockRef.current.release();
+      syncLock();
     }
   }
 
   async function sendTranscript(text: string) {
-    if (!token || !activeHouseholdId || !beginBusy()) return;
+    if (!token || !activeHouseholdId || !lockRef.current.tryStartMutation()) return;
+    syncLock();
     try {
       const next = await submitCommand({
         apiBase,
@@ -107,12 +106,14 @@ export function TalkScreen() {
     } catch {
       setOutcome(REQUEST_ERROR);
     } finally {
-      endBusy();
+      lockRef.current.release();
+      syncLock();
     }
   }
 
   async function onHoldStart() {
-    if (busyRef.current) return;
+    if (!lockRef.current.startHold()) return;
+    syncLock();
     holdActiveRef.current = true;
     const prepare = recorder.prepareToRecordAsync().then(() => {
       recorder.record();
@@ -135,6 +136,8 @@ export function TalkScreen() {
       if (preparePromiseRef.current) await preparePromiseRef.current;
     } catch {
       preparePromiseRef.current = null;
+      lockRef.current.release();
+      syncLock();
       setShowText(true);
       return;
     }
@@ -142,15 +145,24 @@ export function TalkScreen() {
     try {
       await recorder.stop();
     } catch {
+      lockRef.current.release();
+      syncLock();
       setShowText(true);
       return;
     }
     const uri = recorder.uri;
     if (!uri || !token || !activeHouseholdId) {
+      lockRef.current.release();
+      syncLock();
       setShowText(true);
       return;
     }
-    if (!beginBusy()) return;
+    if (!lockRef.current.beginUploadFromHold()) {
+      lockRef.current.release();
+      syncLock();
+      return;
+    }
+    syncLock();
     try {
       const next = await submitAudio({
         apiBase,
@@ -163,7 +175,8 @@ export function TalkScreen() {
     } catch {
       setOutcome(REQUEST_ERROR);
     } finally {
-      endBusy();
+      lockRef.current.release();
+      syncLock();
     }
   }
 
@@ -175,7 +188,7 @@ export function TalkScreen() {
       {token && !activeHouseholdId ? <Text>Pick a household first.</Text> : null}
       <Pressable
         accessibilityLabel="Hold to talk"
-        disabled={busy}
+        disabled={holdControlDisabled}
         onPressIn={() => void onHoldStart()}
         onPressOut={() => void onHoldEnd()}
       >
@@ -190,9 +203,9 @@ export function TalkScreen() {
       {clarification ? (
         <ClarificationPicker
           clarification={clarification}
-          disabled={busy}
+          disabled={mutationsLocked}
           onChooseLocation={(locationId) => {
-            if (busyRef.current) return;
+            if (lockRef.current.mutationsLocked) return;
             const base = pendingCommand.current;
             if (!base) {
               setOutcome(RESUBMIT_ERROR);
@@ -201,7 +214,7 @@ export function TalkScreen() {
             void sendCommand({ ...base, locationId });
           }}
           onChooseItem={(itemId) => {
-            if (busyRef.current) return;
+            if (lockRef.current.mutationsLocked) return;
             const base = pendingCommand.current;
             if (!base) {
               setOutcome(RESUBMIT_ERROR);
@@ -219,7 +232,7 @@ export function TalkScreen() {
             value={transcript}
             onChangeText={setTranscript}
           />
-          <Pressable disabled={busy} onPress={() => void sendTranscript(transcript)}>
+          <Pressable disabled={mutationsLocked} onPress={() => void sendTranscript(transcript)}>
             <Text>Send</Text>
           </Pressable>
         </View>
