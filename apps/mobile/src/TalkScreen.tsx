@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Pressable, Text, TextInput, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import {
   AudioModule,
   RecordingPresets,
@@ -8,10 +8,12 @@ import {
 } from "expo-audio";
 import { randomUUID } from "expo-crypto";
 import type { CommandOutcome, InventoryCommand } from "@putaway/shared";
+import { isPutAwayBatchCommand } from "@putaway/shared";
 import { submitAudio, submitCommand } from "./api";
 import { ClarificationPicker } from "./ClarificationPicker";
 import { useSession } from "./session";
 import { createTalkLock } from "./talkLock";
+import { colors, theme } from "./theme";
 
 const RESUBMIT_ERROR: CommandOutcome = {
   type: "error",
@@ -83,8 +85,12 @@ export function TalkScreen() {
         command,
       });
       applyOutcome(next, command);
-    } catch {
-      setOutcome(REQUEST_ERROR);
+    } catch (error) {
+      setOutcome({
+        type: "error",
+        code: "not_caught",
+        spoken: error instanceof Error ? error.message : REQUEST_ERROR.spoken,
+      });
     } finally {
       lockRef.current.release();
       syncLock();
@@ -92,7 +98,22 @@ export function TalkScreen() {
   }
 
   async function sendTranscript(text: string) {
-    if (!token || !activeHouseholdId || !lockRef.current.tryStartMutation()) return;
+    if (!token || !activeHouseholdId) {
+      setOutcome({
+        type: "error",
+        code: "not_caught",
+        spoken: "Sign in and create a household first.",
+      });
+      return;
+    }
+    if (!lockRef.current.tryStartMutation()) {
+      setOutcome({
+        type: "error",
+        code: "not_caught",
+        spoken: "Still finishing the last request. Wait a moment, then Send again.",
+      });
+      return;
+    }
     syncLock();
     try {
       const next = await submitCommand({
@@ -103,8 +124,12 @@ export function TalkScreen() {
         transcript: text,
       });
       applyOutcome(next);
-    } catch {
-      setOutcome(REQUEST_ERROR);
+    } catch (error) {
+      setOutcome({
+        type: "error",
+        code: "not_caught",
+        spoken: error instanceof Error ? error.message : REQUEST_ERROR.spoken,
+      });
     } finally {
       lockRef.current.release();
       syncLock();
@@ -124,6 +149,8 @@ export function TalkScreen() {
       if (holdActiveRef.current) setRecording(true);
     } catch {
       holdActiveRef.current = false;
+      lockRef.current.release();
+      syncLock();
       setShowText(true);
     }
   }
@@ -172,8 +199,12 @@ export function TalkScreen() {
         audioUri: uri,
       });
       applyOutcome(next);
-    } catch {
-      setOutcome(REQUEST_ERROR);
+    } catch (error) {
+      setOutcome({
+        type: "error",
+        code: "not_caught",
+        spoken: error instanceof Error ? error.message : REQUEST_ERROR.spoken,
+      });
     } finally {
       lockRef.current.release();
       syncLock();
@@ -183,61 +214,102 @@ export function TalkScreen() {
   const clarification = outcome?.type === "clarification" ? outcome.clarification : null;
 
   return (
-    <View>
-      {!token ? <Text>Sign in from the Household tab.</Text> : null}
-      {token && !activeHouseholdId ? <Text>Pick a household first.</Text> : null}
+    <ScrollView
+      style={{ flex: 1, backgroundColor: colors.background }}
+      contentContainerStyle={theme.content}
+      keyboardShouldPersistTaps="handled"
+    >
+      {!token ? <Text style={theme.body}>Sign in from the Household tab.</Text> : null}
+      {token && !activeHouseholdId ? (
+        <Text style={theme.body}>
+          No household yet. Open the Household tab, type a name like Home, tap Create household,
+          then come back here to put items away.
+        </Text>
+      ) : null}
       <Pressable
         accessibilityLabel="Hold to talk"
         disabled={holdControlDisabled}
         onPressIn={() => void onHoldStart()}
         onPressOut={() => void onHoldEnd()}
+        style={[theme.primaryButton, holdControlDisabled && theme.primaryButtonDisabled]}
       >
-        <Text>{recording ? "Listening…" : "Hold to talk"}</Text>
+        <Text style={theme.primaryButtonText}>{recording ? "Listening…" : "Hold to talk"}</Text>
       </Pressable>
       {outcome?.type === "ok" ? (
-        <View accessibilityLabel="confirmation">
-          <Text>{outcome.spoken}</Text>
+        <View accessibilityLabel="confirmation" style={[theme.card, theme.cardBody]}>
+          <Text style={theme.body}>{outcome.spoken}</Text>
         </View>
       ) : null}
-      {outcome?.type === "error" ? <Text>{outcome.spoken}</Text> : null}
+      {outcome?.type === "error" ? <Text style={theme.error}>{outcome.spoken}</Text> : null}
       {clarification ? (
-        <ClarificationPicker
-          clarification={clarification}
-          disabled={mutationsLocked}
-          onChooseLocation={(locationId) => {
-            if (lockRef.current.mutationsLocked) return;
-            const base = pendingCommand.current;
-            if (!base) {
-              setOutcome(RESUBMIT_ERROR);
-              return;
-            }
-            void sendCommand({ ...base, locationId });
-          }}
-          onChooseItem={(itemId) => {
-            if (lockRef.current.mutationsLocked) return;
-            const base = pendingCommand.current;
-            if (!base) {
-              setOutcome(RESUBMIT_ERROR);
-              return;
-            }
-            void sendCommand({ ...base, itemId });
-          }}
-        />
+        <View style={{ gap: 12 }}>
+          {outcome?.type === "clarification" ? (
+            <Text style={theme.body}>{outcome.spoken}</Text>
+          ) : null}
+          <ClarificationPicker
+            clarification={clarification}
+            disabled={mutationsLocked}
+            onChooseLocation={(locationId) => {
+              if (lockRef.current.mutationsLocked) return;
+              const base = pendingCommand.current;
+              if (!base || isPutAwayBatchCommand(base)) {
+                setOutcome(RESUBMIT_ERROR);
+                return;
+              }
+              void sendCommand({ ...base, locationId });
+            }}
+            onChooseItem={(itemId) => {
+              if (lockRef.current.mutationsLocked) return;
+              const base = pendingCommand.current;
+              if (!base || isPutAwayBatchCommand(base)) {
+                setOutcome(RESUBMIT_ERROR);
+                return;
+              }
+              void sendCommand({ ...base, itemId });
+            }}
+            onConfirmBatch={(items) => {
+              if (lockRef.current.mutationsLocked) return;
+              const base = pendingCommand.current;
+              if (!base || !isPutAwayBatchCommand(base)) {
+                setOutcome(RESUBMIT_ERROR);
+                return;
+              }
+              void sendCommand({ ...base, items, confirmed: true });
+            }}
+          />
+        </View>
       ) : null}
       {showText ? (
-        <View>
+        <View style={talkStyles.compose}>
           <TextInput
             accessibilityLabel="transcript"
             placeholder="Type a command"
+            placeholderTextColor={colors.label}
             value={transcript}
             onChangeText={setTranscript}
+            multiline
+            style={[theme.input, talkStyles.transcriptInput]}
           />
-          <Pressable disabled={mutationsLocked} onPress={() => void sendTranscript(transcript)}>
-            <Text>Send</Text>
+          <Pressable
+            disabled={mutationsLocked}
+            onPress={() => void sendTranscript(transcript)}
+            style={[theme.primaryButton, mutationsLocked && theme.primaryButtonDisabled]}
+          >
+            <Text style={theme.primaryButtonText}>Send</Text>
           </Pressable>
         </View>
       ) : null}
-      {busy ? <Text>Working…</Text> : null}
-    </View>
+      {busy ? <Text style={theme.caption}>Working…</Text> : null}
+    </ScrollView>
   );
 }
+
+const talkStyles = StyleSheet.create({
+  compose: {
+    gap: 12,
+  },
+  transcriptInput: {
+    minHeight: 88,
+    textAlignVertical: "top",
+  },
+});

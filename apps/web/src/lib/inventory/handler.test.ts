@@ -227,4 +227,69 @@ describe("handleCommand", () => {
       }
     });
   });
+
+  it("suggests catalog synonyms when take-out string match fails", async () => {
+    await withTestDb(async (db) => {
+      const { householdId } = await createHousehold(db, { userId: "u1", name: "H" });
+      await handleCommand(db, {
+        userId: "u1",
+        householdId,
+        command: {
+          intent: "put_away",
+          itemText: "Kleenex",
+          quantity: 1,
+          locationPath: ["foyer"],
+        },
+      });
+      const asked = await handleCommand(
+        db,
+        {
+          userId: "u1",
+          householdId,
+          command: { intent: "take_out", itemText: "facial tissue", quantity: 1 },
+        },
+        {
+          suggestItems: async (_spoken, catalog) => {
+            const hit = catalog.find((row) => row.name === "Kleenex");
+            return hit ? [hit] : [];
+          },
+        },
+      );
+      expect(asked).toMatchObject({
+        type: "clarification",
+        spoken: "Did you mean Kleenex?",
+      });
+      if (asked.type === "clarification") {
+        expect(asked.clarification).toEqual({
+          type: "which_item",
+          candidates: [{ itemId: expect.any(String), name: "Kleenex" }],
+        });
+      }
+    });
+  });
+
+  it("puts away a confirmed multi-item batch at one place", async () => {
+    await withTestDb(async (db) => {
+      const { householdId } = await createHousehold(db, { userId: "u1", name: "H" });
+      const result = await handleCommand(db, {
+        userId: "u1",
+        householdId,
+        command: {
+          intent: "put_away_batch",
+          confirmed: true,
+          locationPath: ["basement", "shelves", "bottom shelf"],
+          items: [
+            { itemText: "dishwasher detergent", quantity: 1 },
+            { itemText: "dawn", quantity: 2 },
+          ],
+        },
+      });
+      expect(result.type).toBe("ok");
+      if (result.type === "ok") {
+        expect(result.spoken.toLowerCase()).toContain("bottom shelf");
+        expect(result.spoken.toLowerCase()).toContain("dishwasher detergent");
+        expect(result.spoken.toLowerCase()).toContain("dawn");
+      }
+    });
+  });
 });

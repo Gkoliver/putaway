@@ -21,6 +21,10 @@ function Pressable(props) {
   );
 }
 
+function TextInput(props) {
+  return React.createElement("TextInput", props, props.children);
+}
+
 function flatten(style) {
   if (style == null) return undefined;
   if (Array.isArray(style)) {
@@ -46,6 +50,7 @@ module.exports = {
   View,
   Text,
   Pressable,
+  TextInput,
   StyleSheet,
   Platform,
 };

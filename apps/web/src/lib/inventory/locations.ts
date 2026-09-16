@@ -207,6 +207,53 @@ async function wouldCycle(
   return false;
 }
 
+export type LocationCreateResult =
+  | { ok: true; locationId: string; pathLabel: string }
+  | LocationWriteFail;
+
+export async function createLocation(
+  db: Database,
+  {
+    userId,
+    householdId,
+    name,
+    parentId,
+  }: {
+    userId: string;
+    householdId: string;
+    name: string;
+    parentId: string | null;
+  },
+): Promise<LocationCreateResult> {
+  const auth = await requireOwner(db, userId, householdId);
+  if (auth) return auth;
+
+  const trimmed = name.trim();
+  if (!trimmed) return { ok: false, code: "duplicate_name" };
+
+  if (parentId) {
+    const parent = await loadOwnedLocation(db, householdId, parentId);
+    if (!parent) return { ok: false, code: "invalid_parent" };
+    if (parent.archivedAt) return { ok: false, code: "archived" };
+  }
+
+  if (await hasSiblingName(db, householdId, parentId, trimmed, "")) {
+    return { ok: false, code: "duplicate_name" };
+  }
+
+  const [inserted] = await db
+    .insert(locations)
+    .values({
+      householdId,
+      parentId,
+      name: titleCase(trimmed),
+    })
+    .returning();
+
+  const pathLabel = await pathLabelFor(db, householdId, inserted.id);
+  return { ok: true, locationId: inserted.id, pathLabel };
+}
+
 export async function renameLocation(
   db: Database,
   {

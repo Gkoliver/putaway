@@ -5,7 +5,6 @@
   },
   "build": {
     "preview": {
-      "channel": "preview",
       "ios": {
         "distribution": "store"
       },

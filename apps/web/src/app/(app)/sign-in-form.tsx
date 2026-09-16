@@ -5,6 +5,7 @@ import { useState, type FormEvent } from "react";
 export function SignInForm({ callbackURL = "/inventory" }: { callbackURL?: string }) {
   const [sent, setSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [devLink, setDevLink] = useState<string | null>(null);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -19,10 +20,31 @@ export function SignInForm({ callbackURL = "/inventory" }: { callbackURL?: strin
       setError("Could not send sign-in link.");
       return;
     }
+    const dev = await fetch("/api/dev/magic-link", { cache: "no-store" });
+    if (dev.ok) {
+      const body = (await dev.json()) as { url: string | null };
+      setDevLink(body.url);
+    }
     setSent(true);
   }
 
-  if (sent) return <p>Check your email for a sign-in link.</p>;
+  if (sent) {
+    return (
+      <div>
+        <p>No email is sent in local dev. Use the sign-in link below.</p>
+        {devLink ? (
+          <p>
+            <a href={devLink}>Open sign-in link</a>
+          </p>
+        ) : (
+          <p>
+            Link was not captured. In the Next.js terminal, copy the line starting with
+            &quot;Magic link for&quot; and paste it in this browser.
+          </p>
+        )}
+      </div>
+    );
+  }
 
   return (
     <form onSubmit={onSubmit}>

@@ -1,7 +1,7 @@
 import { getDb } from "../../../lib/db/client";
 import { listLocationTree } from "../../../lib/inventory/queries";
 import { loadHouseholdState } from "../household-state";
-import { applyMergeAction, moveLocationAction, previewMergeAction, renameLocationAction } from "./actions";
+import { applyMergeAction, createLocationAction, moveLocationAction, previewMergeAction, renameLocationAction } from "./actions";
 import { LocationTree } from "./location-tree";
 import { MergeForm } from "./merge-form";
 
@@ -21,6 +21,28 @@ export default async function LocationsPage({
   return (
     <main>
       <h1>Locations</h1>
+      {canEdit ? (
+        <form action={createLocationAction}>
+          <input type="hidden" name="householdId" value={household.id} />
+          <h2>Add place</h2>
+          <label>
+            Name
+            <input name="name" required />
+          </label>
+          <label>
+            Parent
+            <select name="parentId" defaultValue="">
+              <option value="">(root)</option>
+              {tree.map((candidate) => (
+                <option key={candidate.id} value={candidate.id}>
+                  {candidate.pathLabel}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button type="submit">Create</button>
+        </form>
+      ) : null}
       <LocationTree
         nodes={tree}
         renderNode={(node) => (

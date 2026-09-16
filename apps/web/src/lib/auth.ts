@@ -4,6 +4,7 @@ import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { nextCookies } from "better-auth/next-js";
 import { bearer, magicLink } from "better-auth/plugins";
 import { getDb } from "./db/client";
+import { rememberDevMagicLink } from "./dev-magic-link";
 import * as schema from "./db/schema";
 
 const dbUrl =
@@ -33,6 +34,7 @@ export const auth = betterAuth({
     magicLink({
       sendMagicLink: async ({ email, url }) => {
         if (process.env.NODE_ENV !== "production") {
+          rememberDevMagicLink(url);
           console.log(`Magic link for ${email}: ${url}`);
           return;
         }

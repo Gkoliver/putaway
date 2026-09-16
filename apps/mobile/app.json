@@ -15,20 +15,27 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "app.putaway.mobile",
+      "bundleIdentifier": "com.olivertech.put-away",
       "infoPlist": {
-        "NSMicrophoneUsageDescription": "Putaway records your voice so you can put things away and find them."
+        "NSMicrophoneUsageDescription": "Putaway records your voice so you can put things away and find them.",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
-      "package": "app.putaway.mobile",
+      "package": "com.olivertech.putaway",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
-      "permissions": ["RECORD_AUDIO"]
+      "permissions": [
+        "RECORD_AUDIO",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png",
@@ -41,7 +48,14 @@
       "expo-web-browser"
     ],
     "experiments": {
-      "typedRoutes": true
+      "typedRoutes": true,
+      "autolinkingModuleResolution": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "b38c4aff-80a5-411f-911d-9576658ffebc"
+      }
     }
   }
 }

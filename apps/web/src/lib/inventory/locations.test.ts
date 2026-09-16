@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { withTestDb } from "../db/test";
 import { locations } from "../db/schema";
 import { createHousehold } from "../households";
-import { pathLabelFor, resolveLocationPath } from "./locations";
+import { createLocation, pathLabelFor, resolveLocationPath } from "./locations";
 
 describe("resolveLocationPath", () => {
   it("creates Basement → Metal shelves → Shelf A on put-away", async () => {
@@ -146,6 +146,73 @@ describe("resolveLocationPath", () => {
       expect(result).toMatchObject({ ok: false, code: "unknown_location" });
       const rows = await db.select().from(locations);
       expect(rows.every((row) => row.name.trim() !== "")).toBe(true);
+    });
+  });
+});
+
+describe("createLocation", () => {
+  it("creates a root node for the owner", async () => {
+    await withTestDb(async (db) => {
+      const { householdId } = await createHousehold(db, { userId: "u1", name: "H" });
+      const result = await createLocation(db, {
+        userId: "u1",
+        householdId,
+        name: "basement",
+        parentId: null,
+      });
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.pathLabel).toBe("Basement");
+      expect(await pathLabelFor(db, householdId, result.locationId)).toBe("Basement");
+    });
+  });
+
+  it("creates a child under an existing parent", async () => {
+    await withTestDb(async (db) => {
+      const { householdId } = await createHousehold(db, { userId: "u1", name: "H" });
+      const parent = await resolveLocationPath(db, {
+        householdId,
+        segments: ["basement"],
+        create: true,
+      });
+      expect(parent.ok).toBe(true);
+      if (!parent.ok) return;
+      const result = await createLocation(db, {
+        userId: "u1",
+        householdId,
+        name: "cabinet",
+        parentId: parent.locationId,
+      });
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.pathLabel).toBe("Basement → Cabinet");
+    });
+  });
+
+  it("rejects duplicate sibling names and non-owners", async () => {
+    await withTestDb(async (db) => {
+      const { householdId } = await createHousehold(db, { userId: "u1", name: "H" });
+      const first = await createLocation(db, {
+        userId: "u1",
+        householdId,
+        name: "Attic",
+        parentId: null,
+      });
+      expect(first.ok).toBe(true);
+      const dup = await createLocation(db, {
+        userId: "u1",
+        householdId,
+        name: "attic",
+        parentId: null,
+      });
+      expect(dup).toMatchObject({ ok: false, code: "duplicate_name" });
+      const forbidden = await createLocation(db, {
+        userId: "stranger",
+        householdId,
+        name: "Garage",
+        parentId: null,
+      });
+      expect(forbidden).toMatchObject({ ok: false, code: "forbidden" });
     });
   });
 });

@@ -1,6 +1,7 @@
 import { getDb } from "../../../lib/db/client";
 import { listInventory } from "../../../lib/inventory/queries";
 import { loadHouseholdState } from "../household-state";
+import { TryCommandForm } from "./try-command-form";
 
 export default async function InventoryPage({
   searchParams,
@@ -35,6 +36,7 @@ export default async function InventoryPage({
           ))}
         </tbody>
       </table>
+      <TryCommandForm householdId={household.id} />
     </main>
   );
 }

@@ -5,13 +5,17 @@ import type {
   ItemCandidate,
   LocationCandidate,
   LotSnapshot,
+  PutAwayBatchCommand,
+  SingleInventoryCommand,
 } from "@putaway/shared";
+import { isPutAwayBatchCommand } from "@putaway/shared";
 import type { Database } from "../db/client";
 import { items, locations } from "../db/schema";
 import { requireMembership } from "../households";
-import { resolveItem } from "./items";
+import { resolveItem, type ItemSuggester } from "./items";
 import { pathLabelFor, resolveLocationPath } from "./locations";
 import { decrementLot, incrementLot, listLotsForItem, type LotListRow } from "./lots";
+import { suggestItemMatches } from "../openai/suggestItems";
 
 class RollbackOutcome extends Error {
   constructor(readonly outcome: CommandOutcome) {
@@ -19,9 +23,14 @@ class RollbackOutcome extends Error {
   }
 }
 
+export type HandleCommandDeps = {
+  suggestItems?: ItemSuggester;
+};
+
 export async function handleCommand(
   db: Database,
   input: { userId: string; householdId: string; command: InventoryCommand },
+  deps: HandleCommandDeps = {},
 ): Promise<CommandOutcome> {
   const membership = await requireMembership(db, input.userId, input.householdId);
   if (!membership) {
@@ -30,7 +39,12 @@ export async function handleCommand(
 
   try {
     return await db.transaction(async (tx) => {
-      const outcome = await applyCommand(tx as unknown as Database, input.householdId, input.command);
+      const outcome = await applyCommand(
+        tx as unknown as Database,
+        input.householdId,
+        input.command,
+        deps,
+      );
       if (outcome.type === "error") {
         throw new RollbackOutcome(outcome);
       }
@@ -46,9 +60,14 @@ async function applyCommand(
   db: Database,
   householdId: string,
   command: InventoryCommand,
+  deps: HandleCommandDeps,
 ): Promise<CommandOutcome> {
+  if (isPutAwayBatchCommand(command)) {
+    return applyPutAwayBatch(db, householdId, command);
+  }
+
   const create = command.intent === "put_away";
-  const item = await resolveCommandItem(db, householdId, command, create);
+  const item = await resolveCommandItem(db, householdId, command, create, deps);
   if (item.type !== "resolved") return item;
 
   const location = await resolveCommandLocation(db, householdId, command, create, item.itemId);
@@ -237,11 +256,82 @@ async function decrementAt(
   return { type: "ok", spoken, itemId, itemName: name, lots };
 }
 
+async function applyPutAwayBatch(
+  db: Database,
+  householdId: string,
+  command: PutAwayBatchCommand,
+): Promise<CommandOutcome> {
+  if (!command.confirmed) {
+    return {
+      type: "error",
+      code: "not_caught",
+      spoken: "Confirm the list before I save it.",
+    };
+  }
+  if (!command.locationPath.length || command.items.length < 2) {
+    return { type: "error", code: "not_caught", spoken: "I didn't catch that." };
+  }
+
+  const at = new Date();
+  const location = await resolveLocationPath(db, {
+    householdId,
+    segments: command.locationPath,
+    create: true,
+  });
+  if (!location.ok) {
+    return { type: "error", code: "unknown_location", spoken: location.spoken };
+  }
+
+  const lines: string[] = [];
+  let lastItemId = "";
+  let lastItemName = "";
+
+  for (const line of command.items) {
+    const lotError = lotQuantityError(line.quantity);
+    if (lotError) return lotError;
+    const item = await resolveItem(db, {
+      householdId,
+      itemText: line.itemText,
+      create: true,
+    });
+    if (!item.ok) {
+      return { type: "error", code: "unknown_item", spoken: item.spoken };
+    }
+    try {
+      const incremented = await incrementLot(db, {
+        householdId,
+        itemId: item.itemId,
+        locationId: location.locationId,
+        quantity: line.quantity,
+        at,
+      });
+      lines.push(`${line.quantity} ${item.name} (now ${incremented.quantity})`);
+      lastItemId = item.itemId;
+      lastItemName = item.name;
+    } catch (error) {
+      return mapLotWriteError(error, {
+        segment: location.pathLabel,
+        itemText: line.itemText,
+      });
+    }
+  }
+
+  const lots = await snapshots(db, householdId, lastItemId);
+  return {
+    type: "ok",
+    spoken: `Added to ${location.pathLabel}: ${lines.join("; ")}.`,
+    itemId: lastItemId,
+    itemName: lastItemName,
+    lots,
+  };
+}
+
 async function resolveCommandItem(
   db: Database,
   householdId: string,
-  command: InventoryCommand,
+  command: SingleInventoryCommand,
   create: boolean,
+  deps: HandleCommandDeps,
 ): Promise<
   | { type: "resolved"; itemId: string; name: string }
   | CommandOutcome
@@ -258,7 +348,12 @@ async function resolveCommandItem(
     return { type: "resolved", itemId: row.id, name: row.name };
   }
 
-  const resolved = await resolveItem(db, { householdId, itemText: command.itemText, create });
+  const resolved = await resolveItem(db, {
+    householdId,
+    itemText: command.itemText,
+    create,
+    suggest: create ? undefined : (deps.suggestItems ?? suggestItemMatches),
+  });
   if (resolved.ok) {
     return { type: "resolved", itemId: resolved.itemId, name: resolved.name };
   }
@@ -276,7 +371,7 @@ async function resolveCommandItem(
 async function resolveCommandLocation(
   db: Database,
   householdId: string,
-  command: InventoryCommand,
+  command: SingleInventoryCommand,
   create: boolean,
   itemId: string,
 ): Promise<

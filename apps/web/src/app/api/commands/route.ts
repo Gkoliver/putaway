@@ -1,6 +1,7 @@
 import {
   interpretTranscript,
-  isIntent,
+  isPutAwayBatchCommand,
+  pathLabelFromSegments,
   type CommandOutcome,
   type InventoryCommand,
 } from "@putaway/shared";
@@ -69,7 +70,7 @@ export async function handleCommandsPost(
 
       if (!command && transcript !== undefined) {
         const interpreted = await interpretTranscript(transcript, extract);
-        if ("intent" in interpreted && isIntent(interpreted.intent)) {
+        if ("intent" in interpreted) {
           command = interpreted;
         } else if ("type" in interpreted && interpreted.type === "follow_up") {
           return {
@@ -87,6 +88,28 @@ export async function handleCommandsPost(
           type: "error",
           code: "not_caught",
           spoken: "I didn't catch that.",
+        };
+      }
+
+      if (isPutAwayBatchCommand(command) && !command.confirmed) {
+        if (!command.locationPath.length || command.items.length < 2) {
+          return {
+            type: "error",
+            code: "not_caught",
+            spoken: "I didn't catch that.",
+          };
+        }
+        const pathLabel = pathLabelFromSegments(command.locationPath);
+        return {
+          type: "clarification",
+          spoken: `Add ${command.items.length} items to ${pathLabel}?`,
+          clarification: {
+            type: "confirm_batch",
+            locationPath: command.locationPath,
+            pathLabel,
+            items: command.items,
+          },
+          command,
         };
       }
 

@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { getDb } from "../../../lib/db/client";
 import { applyMerge, previewMerge } from "../../../lib/inventory/merge";
-import { moveLocation, renameLocation } from "../../../lib/inventory/locations";
+import { createLocation, moveLocation, renameLocation } from "../../../lib/inventory/locations";
 import { getSessionUser } from "../session";
 
 async function requireUserId(): Promise<string> {
@@ -30,6 +30,16 @@ export async function applyMergeAction(input: {
   const result = await applyMerge(getDb(), { ...input, userId });
   if (result.ok) revalidatePath("/locations");
   return result;
+}
+
+export async function createLocationAction(formData: FormData) {
+  const userId = await requireUserId();
+  const householdId = String(formData.get("householdId") ?? "");
+  const name = String(formData.get("name") ?? "");
+  const rawParent = String(formData.get("parentId") ?? "");
+  const parentId = rawParent.length === 0 ? null : rawParent;
+  await createLocation(getDb(), { userId, householdId, name, parentId });
+  revalidatePath("/locations");
 }
 
 export async function renameLocationAction(formData: FormData) {

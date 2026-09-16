@@ -58,10 +58,71 @@ async function lockAndRequireActiveLocation(
   }
 }
 
+function requireNonNegativeInteger(quantity: number): void {
+  if (!Number.isInteger(quantity) || quantity < 0) {
+    throw new Error("quantity must be a non-negative integer");
+  }
+}
+
 function requirePositiveQuantity(quantity: number): void {
   if (quantity <= 0) {
     throw new Error("quantity must be positive");
   }
+}
+
+export async function setLotQuantity(
+  db: Database,
+  {
+    householdId,
+    itemId,
+    locationId,
+    quantity,
+    at,
+  }: {
+    householdId: string;
+    itemId: string;
+    locationId: string;
+    quantity: number;
+    at: Date;
+  },
+): Promise<{ quantity: number }> {
+  requireNonNegativeInteger(quantity);
+  await requireOwnedItem(db, householdId, itemId);
+  await lockAndRequireActiveLocation(db, householdId, locationId);
+
+  const [existing] = await db
+    .select()
+    .from(stockLots)
+    .where(
+      and(
+        eq(stockLots.householdId, householdId),
+        eq(stockLots.itemId, itemId),
+        eq(stockLots.locationId, locationId),
+      ),
+    )
+    .for("update")
+    .limit(1);
+
+  if (!existing) {
+    const [row] = await db
+      .insert(stockLots)
+      .values({
+        householdId,
+        itemId,
+        locationId,
+        quantity,
+        putAwayCount: quantity > 0 ? 1 : 0,
+        lastActivityAt: at,
+      })
+      .returning();
+    return { quantity: row.quantity };
+  }
+
+  await db
+    .update(stockLots)
+    .set({ quantity, lastActivityAt: at })
+    .where(eq(stockLots.id, existing.id));
+  return { quantity };
 }
 
 export async function incrementLot(

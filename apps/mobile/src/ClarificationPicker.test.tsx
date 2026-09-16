@@ -40,4 +40,60 @@ describe("ClarificationPicker", () => {
     fireEvent.press(screen.getByText("Kitchen (4)"));
     expect(onChooseLocation).not.toHaveBeenCalled();
   });
+
+  it("shows a confirm checklist for a multi-item put-away", () => {
+    const onConfirmBatch = vi.fn();
+    render(
+      <ClarificationPicker
+        clarification={{
+          type: "confirm_batch",
+          locationPath: ["basement", "shelves"],
+          pathLabel: "Basement → Shelves",
+          items: [
+            { itemText: "dishwasher detergent", quantity: 1 },
+            { itemText: "dawn", quantity: 2 },
+          ],
+        }}
+        onChooseLocation={vi.fn()}
+        onChooseItem={vi.fn()}
+        onConfirmBatch={onConfirmBatch}
+      />,
+    );
+    expect(screen.getByText("Basement → Shelves")).toBeTruthy();
+    expect(screen.getByDisplayValue("dishwasher detergent")).toBeTruthy();
+    expect(screen.getByDisplayValue("dawn")).toBeTruthy();
+    fireEvent.press(screen.getByLabelText("Confirm list"));
+    expect(onConfirmBatch).toHaveBeenCalledWith([
+      { itemText: "dishwasher detergent", quantity: 1 },
+      { itemText: "dawn", quantity: 2 },
+    ]);
+  });
+
+  it("lets the user edit batch names and quantities before confirm", () => {
+    const onConfirmBatch = vi.fn();
+    render(
+      <ClarificationPicker
+        clarification={{
+          type: "confirm_batch",
+          locationPath: ["garage"],
+          pathLabel: "Garage",
+          items: [
+            { itemText: "laundry detergent", quantity: 1 },
+            { itemText: "cat food", quantity: 3 },
+          ],
+        }}
+        onChooseLocation={vi.fn()}
+        onChooseItem={vi.fn()}
+        onConfirmBatch={onConfirmBatch}
+      />,
+    );
+    fireEvent.changeText(screen.getByLabelText("item name 1"), "laundry detergent");
+    fireEvent.changeText(screen.getByLabelText("item name 1"), "pandry detergent");
+    fireEvent.changeText(screen.getByLabelText("quantity 2"), "2");
+    fireEvent.press(screen.getByLabelText("Confirm list"));
+    expect(onConfirmBatch).toHaveBeenCalledWith([
+      { itemText: "pandry detergent", quantity: 1 },
+      { itemText: "cat food", quantity: 2 },
+    ]);
+  });
 });
