@@ -9,10 +9,13 @@ import {
 } from "react";
 import * as Linking from "expo-linking";
 import * as SecureStore from "expo-secure-store";
-import { apiBase, authClient } from "./auth";
-import { applyAuthCallbackUrl, importCookieFromInitialUrl } from "./sessionAuth";
+import { apiBase, signOut as signOutFromApi } from "./auth";
+import {
+  applyAuthCallbackUrl,
+  AUTH_TOKEN_STORAGE_KEY,
+  importTokenFromInitialUrl,
+} from "./sessionAuth";
 
-const TOKEN_KEY = "putaway.bearerToken";
 const HOUSEHOLD_KEY = "putaway.activeHouseholdId";
 
 type SessionValue = {
@@ -28,28 +31,13 @@ type SessionValue = {
 
 const SessionContext = createContext<SessionValue | null>(null);
 
-async function readBearerFromAuth(): Promise<string | null> {
-  const session = await authClient.getSession();
-  const token = session.data?.session?.token;
-  if (token) {
-    await SecureStore.setItemAsync(TOKEN_KEY, token);
-    return token;
-  }
-  const cookies = await authClient.getCookie();
-  const match = cookies.match(/better-auth\.session_token=([^;]+)/);
-  if (!match?.[1]) return null;
-  const fromCookie = decodeURIComponent(match[1]);
-  await SecureStore.setItemAsync(TOKEN_KEY, fromCookie);
-  return fromCookie;
-}
-
 export function SessionProvider({ children }: { children: ReactNode }) {
   const [token, setToken] = useState<string | null>(null);
   const [activeHouseholdId, setHouseholdId] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
 
   const refreshToken = useCallback(async () => {
-    const next = (await readBearerFromAuth()) ?? (await SecureStore.getItemAsync(TOKEN_KEY));
+    const next = await SecureStore.getItemAsync(AUTH_TOKEN_STORAGE_KEY);
     setToken(next);
     return next;
   }, []);
@@ -65,34 +53,45 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signOut = useCallback(async () => {
-    await authClient.signOut();
-    await SecureStore.deleteItemAsync(TOKEN_KEY);
-    await SecureStore.deleteItemAsync(HOUSEHOLD_KEY);
-    setToken(null);
-    setHouseholdId(null);
-  }, []);
+    try {
+      if (token) await signOutFromApi(apiBase, token);
+    } finally {
+      await SecureStore.deleteItemAsync(AUTH_TOKEN_STORAGE_KEY);
+      await SecureStore.deleteItemAsync(HOUSEHOLD_KEY);
+      setToken(null);
+      setHouseholdId(null);
+    }
+  }, [token]);
 
   useEffect(() => {
     void (async () => {
       const storedHousehold = await SecureStore.getItemAsync(HOUSEHOLD_KEY);
       if (storedHousehold) setHouseholdId(storedHousehold);
-      const storedToken = await SecureStore.getItemAsync(TOKEN_KEY);
+      const storedToken = await SecureStore.getItemAsync(AUTH_TOKEN_STORAGE_KEY);
       if (storedToken) setToken(storedToken);
-      await importCookieFromInitialUrl(() => Linking.getInitialURL(), SecureStore);
-      await refreshToken();
+      try {
+        const imported = await importTokenFromInitialUrl(() => Linking.getInitialURL(), SecureStore);
+        if (imported) setToken(imported);
+      } catch {
+        // Invalid or expired links should not prevent the app from starting.
+      }
       setReady(true);
     })();
-  }, [refreshToken]);
+  }, []);
 
   useEffect(() => {
     const sub = Linking.addEventListener("url", (event) => {
       void (async () => {
-        await applyAuthCallbackUrl(event.url, SecureStore);
-        await refreshToken();
+        try {
+          const imported = await applyAuthCallbackUrl(event.url, SecureStore);
+          if (imported) setToken(imported);
+        } catch {
+          // The sign-in screen handles verification errors for links entered there.
+        }
       })();
     });
     return () => sub.remove();
-  }, [refreshToken]);
+  }, []);
 
   const value = useMemo(
     () => ({

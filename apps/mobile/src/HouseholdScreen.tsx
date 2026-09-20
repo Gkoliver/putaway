@@ -1,15 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
-import * as Linking from "expo-linking";
 import * as SecureStore from "expo-secure-store";
-import * as WebBrowser from "expo-web-browser";
 import { createHousehold, fetchHouseholds, type HouseholdRow } from "./api";
-import { authClient } from "./auth";
+import { requestMagicLink } from "./auth";
 import { useSession } from "./session";
 import { applyAuthCallbackUrl } from "./sessionAuth";
 import { colors, theme } from "./theme";
-
-WebBrowser.maybeCompleteAuthSession();
 
 export function HouseholdScreen() {
   const {
@@ -23,10 +19,10 @@ export function HouseholdScreen() {
   } = useSession();
   const [email, setEmail] = useState("");
   const [sent, setSent] = useState(false);
+  const [verifyUrl, setVerifyUrl] = useState("");
   const [name, setName] = useState("");
   const [households, setHouseholds] = useState<HouseholdRow[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [devLink, setDevLink] = useState<string | null>(null);
   const [opening, setOpening] = useState(false);
 
   const loadHouseholds = useCallback(async () => {
@@ -58,57 +54,35 @@ export function HouseholdScreen() {
   }, [loadHouseholds]);
 
   const completeMagicLink = useCallback(
-    async (verifyUrl: string) => {
+    async () => {
       setOpening(true);
       setError(null);
       try {
-        const callbackURL = Linking.createURL("/");
-        const result = await WebBrowser.openAuthSessionAsync(verifyUrl, callbackURL);
-        if (result.type !== "success" || !("url" in result) || !result.url) {
-          setError("Sign-in was cancelled. Tap Open sign-in link to try again.");
+        const storedToken = await applyAuthCallbackUrl(verifyUrl.trim(), SecureStore);
+        if (!storedToken) {
+          setError("Paste the complete sign-in link from your email.");
           return;
         }
-        await applyAuthCallbackUrl(result.url, SecureStore);
         const next = await refreshToken();
         if (!next) {
-          setError("Signed in on the server, but the app did not get a session. Tap Open sign-in link again.");
+          setError("Signed in, but the app could not save the session.");
         }
       } catch {
-        setError("Could not open the sign-in link.");
+        setError("That sign-in link is invalid or expired.");
       } finally {
         setOpening(false);
       }
     },
-    [refreshToken],
+    [refreshToken, verifyUrl],
   );
 
   async function sendMagicLink() {
     setError(null);
-    const callbackURL = Linking.createURL("/");
-    const { error: sendError } = await authClient.signIn.magicLink({
-      email,
-      callbackURL,
-    });
-    if (sendError) {
-      setError("Could not send sign-in link.");
-      return;
-    }
-    let link: string | null = null;
     try {
-      const res = await fetch(`${apiBase}/api/dev/magic-link`);
-      if (res.ok) {
-        const body = (await res.json()) as { url: string | null };
-        link = body.url;
-        setDevLink(body.url);
-      }
+      await requestMagicLink(apiBase, email.trim());
+      setSent(true);
     } catch {
-      setDevLink(null);
-    }
-    setSent(true);
-    if (link) {
-      await completeMagicLink(link);
-    } else {
-      setError("Link was created, but this app could not fetch it. Is the API running on port 3000?");
+      setError("Could not send sign-in link.");
     }
   }
 
@@ -137,10 +111,9 @@ export function HouseholdScreen() {
         keyboardShouldPersistTaps="handled"
       >
         <Text style={theme.body}>
-          Local dev does not send email. Tap Send and a browser will open to finish sign-in on this
-          simulator.
+          Enter your email, then copy the sign-in link from the email and paste it below.
         </Text>
-        {sent ? <Text style={theme.caption}>Link ready.</Text> : null}
+        {sent ? <Text style={theme.caption}>Sign-in link sent. Check your email.</Text> : null}
         <TextInput
           accessibilityLabel="email"
           autoCapitalize="none"
@@ -157,14 +130,28 @@ export function HouseholdScreen() {
           style={[theme.primaryButton, opening ? { opacity: 0.5 } : null]}
         >
           <Text style={theme.primaryButtonText}>
-            {opening ? "Opening sign-in…" : "Send sign-in link"}
+            Send sign-in link
           </Text>
         </Pressable>
-        {devLink ? (
-          <Pressable disabled={opening} onPress={() => void completeMagicLink(devLink)}>
-            <Text style={theme.link}>Open sign-in link again</Text>
-          </Pressable>
-        ) : null}
+        <TextInput
+          accessibilityLabel="sign-in link"
+          autoCapitalize="none"
+          autoCorrect={false}
+          placeholder="Paste sign-in link"
+          placeholderTextColor={colors.label}
+          value={verifyUrl}
+          onChangeText={setVerifyUrl}
+          style={theme.input}
+        />
+        <Pressable
+          disabled={opening}
+          onPress={() => void completeMagicLink()}
+          style={[theme.primaryButton, opening ? { opacity: 0.5 } : null]}
+        >
+          <Text style={theme.primaryButtonText}>
+            {opening ? "Signing in…" : "Verify sign-in link"}
+          </Text>
+        </Pressable>
         <Pressable onPress={() => void refreshToken()}>
           <Text style={theme.link}>Refresh session</Text>
         </Pressable>

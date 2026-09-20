@@ -1,17 +1,19 @@
-import { getCookie, getSetCookie } from "@better-auth/expo/client";
+import { apiBase, verifyMagicLink, type VerifiedAuth } from "./auth";
 
-export const AUTH_COOKIE_STORAGE_KEY = "putaway_cookie";
+export const AUTH_TOKEN_STORAGE_KEY = "putaway.bearerToken";
 
-export type AuthCookieStorage = {
-  getItemAsync: (key: string) => Promise<string | null>;
+export type AuthTokenStorage = {
   setItemAsync: (key: string, value: string) => Promise<void>;
 };
 
-export function cookieHeaderFromCallbackUrl(url: string | null | undefined): string | null {
+type VerifyMagicToken = (token: string) => Promise<VerifiedAuth>;
+
+const verifyAgainstApi: VerifyMagicToken = (token) => verifyMagicLink(apiBase, token);
+
+export function magicTokenFromCallbackUrl(url: string | null | undefined): string | null {
   if (!url) return null;
   try {
-    const cookie = new URL(url).searchParams.get("cookie");
-    return cookie ? cookie : null;
+    return new URL(url).searchParams.get("token");
   } catch {
     return null;
   }
@@ -19,19 +21,20 @@ export function cookieHeaderFromCallbackUrl(url: string | null | undefined): str
 
 export async function applyAuthCallbackUrl(
   url: string | null | undefined,
-  storage: AuthCookieStorage,
+  storage: AuthTokenStorage,
+  verify: VerifyMagicToken = verifyAgainstApi,
 ): Promise<string | null> {
-  const header = cookieHeaderFromCallbackUrl(url);
-  if (!header) return null;
-  const previous = await storage.getItemAsync(AUTH_COOKIE_STORAGE_KEY);
-  const stored = getSetCookie(header, previous ?? undefined);
-  await storage.setItemAsync(AUTH_COOKIE_STORAGE_KEY, stored);
-  return getCookie(stored);
+  const magicToken = magicTokenFromCallbackUrl(url);
+  if (!magicToken) return null;
+  const auth = await verify(magicToken);
+  await storage.setItemAsync(AUTH_TOKEN_STORAGE_KEY, auth.token);
+  return auth.token;
 }
 
-export async function importCookieFromInitialUrl(
+export async function importTokenFromInitialUrl(
   getInitialURL: () => Promise<string | null>,
-  storage: AuthCookieStorage,
+  storage: AuthTokenStorage,
+  verify: VerifyMagicToken = verifyAgainstApi,
 ): Promise<string | null> {
-  return applyAuthCallbackUrl(await getInitialURL(), storage);
+  return applyAuthCallbackUrl(await getInitialURL(), storage, verify);
 }

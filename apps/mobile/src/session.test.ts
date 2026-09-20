@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   applyAuthCallbackUrl,
-  cookieHeaderFromCallbackUrl,
-  importCookieFromInitialUrl,
+  AUTH_TOKEN_STORAGE_KEY,
+  importTokenFromInitialUrl,
+  magicTokenFromCallbackUrl,
 } from "./sessionAuth";
 
 function fakeStorage(initial: Record<string, string> = {}) {
@@ -18,46 +19,53 @@ function fakeStorage(initial: Record<string, string> = {}) {
   };
 }
 
-describe("cookieHeaderFromCallbackUrl", () => {
-  it("extracts the cookie query from a putaway deep link", () => {
+describe("magicTokenFromCallbackUrl", () => {
+  it("extracts the magic token from an API or web verification link", () => {
     expect(
-      cookieHeaderFromCallbackUrl(
-        "putaway:///?cookie=better-auth.session_token=tok123; Path=/",
-      ),
-    ).toBe("better-auth.session_token=tok123; Path=/");
+      magicTokenFromCallbackUrl("https://put-away.com/auth/verify?token=magic123"),
+    ).toBe("magic123");
+    expect(magicTokenFromCallbackUrl("putaway:///?token=magic456")).toBe("magic456");
   });
 
-  it("returns null when the URL has no cookie param", () => {
-    expect(cookieHeaderFromCallbackUrl("putaway://talk")).toBeNull();
+  it("returns null when the URL has no token param", () => {
+    expect(magicTokenFromCallbackUrl("putaway://talk")).toBeNull();
   });
 });
 
 describe("applyAuthCallbackUrl", () => {
-  it("stores the session cookie so getCookie yields the token", async () => {
+  it("exchanges a magic token and stores the returned bearer token", async () => {
     const storage = fakeStorage();
-    const cookie = await applyAuthCallbackUrl(
-      "putaway:///?cookie=better-auth.session_token=tok123; Path=/",
+    const token = await applyAuthCallbackUrl(
+      "https://put-away.com/auth/verify?token=magic123",
       storage,
+      async (magicToken) => {
+        expect(magicToken).toBe("magic123");
+        return { token: "bearer123", user: { id: "user-1", email: "person@example.com" } };
+      },
     );
-    expect(cookie).toMatch(/better-auth\.session_token=tok123/);
-    expect(storage.data.putaway_cookie).toBeTruthy();
-    expect(
-      JSON.parse(storage.data.putaway_cookie)["better-auth.session_token"].value,
-    ).toBe("tok123");
+    expect(token).toBe("bearer123");
+    expect(storage.data[AUTH_TOKEN_STORAGE_KEY]).toBe("bearer123");
   });
 
-  it("does not write storage when the URL has no cookie param", async () => {
+  it("does not verify or write storage when the URL has no token param", async () => {
     const storage = fakeStorage();
-    const cookie = await applyAuthCallbackUrl("putaway://talk", storage);
-    expect(cookie).toBeNull();
-    expect(storage.data.putaway_cookie).toBeUndefined();
+    let verified = false;
+    const token = await applyAuthCallbackUrl("putaway://talk", storage, async () => {
+      verified = true;
+      return { token: "unused", user: { id: "unused", email: "unused@example.com" } };
+    });
+    expect(token).toBeNull();
+    expect(verified).toBe(false);
+    expect(storage.data[AUTH_TOKEN_STORAGE_KEY]).toBeUndefined();
   });
 
-  it("imports a cookie from Linking.getInitialURL on cold start", async () => {
+  it("imports a bearer token from Linking.getInitialURL on cold start", async () => {
     const storage = fakeStorage();
-    const getInitialURL = async () =>
-      "putaway:///?cookie=better-auth.session_token=tok123; Path=/";
-    const cookie = await importCookieFromInitialUrl(getInitialURL, storage);
-    expect(cookie).toMatch(/better-auth\.session_token=tok123/);
+    const getInitialURL = async () => "putaway:///?token=magic123";
+    const token = await importTokenFromInitialUrl(getInitialURL, storage, async () => ({
+      token: "bearer123",
+      user: { id: "user-1", email: "person@example.com" },
+    }));
+    expect(token).toBe("bearer123");
   });
 });

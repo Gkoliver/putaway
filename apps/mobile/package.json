@@ -12,11 +12,9 @@
   },
   "dependencies": {
     "@babel/core": "^7.29.7",
-    "@better-auth/expo": "^1.7.3",
     "@expo/vector-icons": "^15.1.1",
     "@putaway/shared": "workspace:*",
     "babel-preset-expo": "~57.0.10",
-    "better-auth": "^1.7.3",
     "expo": "^57.0.9",
     "expo-audio": "~57.0.4",
     "expo-constants": "~57.0.17",
