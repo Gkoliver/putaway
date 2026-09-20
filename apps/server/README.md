@@ -109,9 +109,10 @@ Store builds must target the live PHP API:
 EXPO_PUBLIC_API_BASE=https://put-away.com
 ```
 
-The default in `apps/mobile/src/auth.ts` is already `https://put-away.com`, but set this
-explicitly for EAS preview/production profiles (see `apps/mobile/eas.json` and
-`apps/mobile/.env.example`) so dev overrides never ship to TestFlight or Play internal.
+Production API base comes from the `preview` profile in `apps/mobile/eas.json` (store/internal
+builds) and/or the fallback in `apps/mobile/src/auth.ts` (`https://put-away.com`). Local dev can
+override via `apps/mobile/.env`; there is no separate EAS `production` profile yet. Ensure dev
+overrides do not ship to TestFlight or Play internal.
 
 Rebuild and submit the mobile app after the server is live.
 
@@ -141,8 +142,9 @@ Run after deploy, with SSL and `config.php` in place:
 - [ ] **Invite:** Send a household invite and accept it (web or mobile).
 - [ ] **Mobile build:** Confirm the shipped app uses `EXPO_PUBLIC_API_BASE=https://put-away.com`.
 
-When the above passes, disable or remove the old Vercel project and pause/delete Neon — there is
-no automatic migration; production starts from a fresh MySQL import.
+When the above passes, disable or remove the old Vercel project, pause/delete Neon, and
+cancel or remove the Resend account/API usage — there is no automatic migration; production
+starts from a fresh MySQL import with host mail for magic links.
 
 ## Web UI smoke checklist
 
