@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { householdMembers } from "../../../lib/db/schema";
 import { withTestDb } from "../../../lib/db/test";
 import { createHousehold } from "../../../lib/households";
-import { handleCommandsPost } from "./route";
+import { handleCommandsPost } from "./handlers";
 
 describe("POST /api/commands", () => {
   it("returns 403 when the user is not a member", async () => {

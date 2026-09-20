@@ -6,7 +6,7 @@ import {
   handleLocationsGet,
   handleLocationsPatch,
   handleLocationsPost,
-} from "./route";
+} from "./handlers";
 
 describe("GET /api/households/[householdId]/locations", () => {
   it("returns 401 when signed out", async () => {

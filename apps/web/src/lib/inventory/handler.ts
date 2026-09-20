@@ -170,7 +170,7 @@ async function takeOut(
     at,
   }: {
     householdId: string;
-    command: InventoryCommand;
+    command: SingleInventoryCommand;
     itemId: string;
     name: string;
     location?: { locationId: string; pathLabel: string };

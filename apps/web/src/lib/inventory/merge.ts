@@ -44,13 +44,19 @@ async function requireOwner(
   return null;
 }
 
+type LocationRow = typeof locations.$inferSelect;
+
+type LoadPairResult =
+  | { error: MergeFail }
+  | { source: LocationRow; target: LocationRow };
+
 async function loadPair(
   db: Database,
   householdId: string,
   sourceLocationId: string,
   targetLocationId: string,
   options?: { lock?: boolean },
-) {
+): Promise<LoadPairResult> {
   if (sourceLocationId === targetLocationId) return { error: invalidMerge() };
 
   const query = db

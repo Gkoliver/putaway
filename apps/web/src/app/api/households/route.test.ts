@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { withTestDb } from "../../../lib/db/test";
 import { acceptInvite, createHousehold, createInvite } from "../../../lib/households";
-import { handleInventoryGet, handleInventoryPatch } from "./[householdId]/inventory/route";
+import { handleInventoryGet, handleInventoryPatch } from "./[householdId]/inventory/handlers";
 import { incrementLot } from "../../../lib/inventory/lots";
 import { resolveItem } from "../../../lib/inventory/items";
 import { resolveLocationPath } from "../../../lib/inventory/locations";
-import { handleInvitesPost } from "./invites/route";
-import { handleHouseholdsPost } from "./route";
+import { handleInvitesPost } from "./invites/handlers";
+import { handleHouseholdsPost } from "./handlers";
 
 describe("POST /api/households", () => {
   it("creates a household for the signed-in user", async () => {
