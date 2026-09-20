@@ -43,28 +43,60 @@ final class AuthController
                 throw new RuntimeException('User not found');
             }
 
-            return Response::json([
+            $response = Response::json([
                 'token' => $session['sessionToken'],
                 'user' => $user,
             ]);
+            return $this->noStore($response);
         } catch (RuntimeException) {
-            return Response::json(['error' => 'invalid_or_expired_token'], 400);
+            return $this->noStore(
+                Response::json(['error' => 'invalid_or_expired_token'], 400),
+            );
         }
     }
 
     public function verifyWeb(Request $request): Response
     {
+        $token = $request->queryParam('token') ?? '';
+        if ($token === '') {
+            return $this->noStore(
+                Response::html('<!doctype html><html lang="en"><body><h1>Invalid magic link</h1></body></html>', 400),
+            );
+        }
+
+        $escapedToken = htmlspecialchars($token, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+        $deepLink = 'putaway://auth/verify?token=' . rawurlencode($token);
+        $html = '<!doctype html><html lang="en"><head><meta charset="utf-8">'
+            . '<meta name="viewport" content="width=device-width, initial-scale=1">'
+            . '<title>Continue to Putaway</title></head><body>'
+            . '<main><h1>Continue to Putaway</h1>'
+            . '<form method="post" action="/auth/verify">'
+            . '<input type="hidden" name="token" value="' . $escapedToken . '">'
+            . '<button type="submit">Continue on web</button></form>'
+            . '<p><a href="' . htmlspecialchars($deepLink, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8')
+            . '">Open in Putaway app</a></p>'
+            . '<p>Token: <code>' . $escapedToken . '</code></p>'
+            . '</main></body></html>';
+
+        return $this->noStore(Response::html($html));
+    }
+
+    public function consumeWeb(Request $request): Response
+    {
         try {
-            $session = $this->auth->consumeMagicLink($request->queryParam('token') ?? '');
+            $session = $this->auth->consumeMagicLink($request->bodyParam('token') ?? '');
             $cookie = 'putaway_session=' . rawurlencode($session['sessionToken'])
                 . '; Path=/; HttpOnly; Secure; SameSite=Lax';
 
             return new Response(302, '', [
                 'Location' => '/inventory',
                 'Set-Cookie' => $cookie,
+                'Cache-Control' => 'no-store',
             ]);
         } catch (RuntimeException) {
-            return Response::json(['error' => 'invalid_or_expired_token'], 400);
+            return $this->noStore(
+                Response::json(['error' => 'invalid_or_expired_token'], 400),
+            );
         }
     }
 
@@ -79,6 +111,20 @@ final class AuthController
         return new Response(204, '');
     }
 
+    public function signOutWeb(Request $request): Response
+    {
+        $token = $request->cookie('putaway_session');
+        if ($token !== null && $token !== '') {
+            $this->auth->revokeSession($token);
+        }
+
+        return new Response(303, '', [
+            'Location' => '/sign-in',
+            'Set-Cookie' => 'putaway_session=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax',
+            'Cache-Control' => 'no-store',
+        ]);
+    }
+
     public function me(Request $request): Response
     {
         $user = $this->auth->userForBearer($request->bearerToken());
@@ -87,5 +133,14 @@ final class AuthController
         }
 
         return Response::json(['user' => $user]);
+    }
+
+    private function noStore(Response $response): Response
+    {
+        return new Response(
+            $response->status,
+            $response->body,
+            $response->headers + ['Cache-Control' => 'no-store'],
+        );
     }
 }

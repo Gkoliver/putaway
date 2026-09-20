@@ -202,6 +202,58 @@ final class LocationServiceTest extends TestCase
         self::assertSame(['id', 'parentId', 'name', 'pathLabel'], array_keys($this->json($listed->body)[0]));
     }
 
+    public function test_combined_rename_and_move_validates_name_at_final_parent(): void
+    {
+        $attic = $this->locations->createLocation('owner', 'home', 'Attic', null);
+        $box = $this->locations->createLocation('owner', 'home', 'Box', $attic['locationId']);
+        $garage = $this->locations->createLocation('owner', 'home', 'Garage', null);
+        $this->locations->createLocation('owner', 'home', 'Bin', $garage['locationId']);
+
+        $response = $this->controller->updateLocation(
+            $this->request('PATCH', [
+                'locationId' => $box['locationId'],
+                'name' => 'Bin',
+                'parentId' => $garage['locationId'],
+            ]),
+            'home',
+        );
+
+        self::assertSame(409, $response->status);
+        self::assertSame('duplicate_name', $this->json($response->body)['error']);
+        $rows = $this->locations->listLocations('owner', 'home');
+        $boxRow = array_values(array_filter(
+            $rows,
+            static fn (array $row): bool => $row['id'] === $box['locationId'],
+        ))[0];
+        self::assertSame('Box', $boxRow['name']);
+        self::assertSame($attic['locationId'], $boxRow['parentId']);
+    }
+
+    public function test_combined_rename_and_move_can_use_name_available_at_final_parent(): void
+    {
+        $attic = $this->locations->createLocation('owner', 'home', 'Attic', null);
+        $box = $this->locations->createLocation('owner', 'home', 'Box', $attic['locationId']);
+        $this->locations->createLocation('owner', 'home', 'Bin', $attic['locationId']);
+        $garage = $this->locations->createLocation('owner', 'home', 'Garage', null);
+
+        $response = $this->controller->updateLocation(
+            $this->request('PATCH', [
+                'locationId' => $box['locationId'],
+                'name' => 'Bin',
+                'parentId' => $garage['locationId'],
+            ]),
+            'home',
+        );
+
+        self::assertSame(200, $response->status);
+        $rows = $this->locations->listLocations('owner', 'home');
+        $moved = array_values(array_filter(
+            $rows,
+            static fn (array $row): bool => $row['id'] === $box['locationId'],
+        ))[0];
+        self::assertSame('Garage → Bin', $moved['pathLabel']);
+    }
+
     public function test_controller_returns_mobile_friendly_errors(): void
     {
         $this->locations->createLocation('owner', 'home', 'Attic', null);

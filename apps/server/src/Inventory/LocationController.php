@@ -77,28 +77,22 @@ final class LocationController
             return $this->invalid();
         }
 
+        $changes = [];
         if ($hasName) {
-            $renamed = $this->locations->renameLocation(
-                $userId,
-                $householdId,
-                $locationId,
-                $body['name'],
-            );
-            if (!$renamed['ok']) {
-                return $this->failure($renamed['code']);
-            }
+            $changes['name'] = $body['name'];
+        }
+        if ($hasParent) {
+            $changes['parentId'] = $body['parentId'];
         }
 
-        if ($hasParent) {
-            $moved = $this->locations->moveLocation(
-                $userId,
-                $householdId,
-                $locationId,
-                $body['parentId'],
-            );
-            if (!$moved['ok']) {
-                return $this->failure($moved['code']);
-            }
+        $updated = $this->locations->updateLocation(
+            $userId,
+            $householdId,
+            $locationId,
+            $changes,
+        );
+        if (!$updated['ok']) {
+            return $this->failure($updated['code']);
         }
 
         return Response::json(['ok' => true]);

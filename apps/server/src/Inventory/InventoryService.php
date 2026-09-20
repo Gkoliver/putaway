@@ -116,8 +116,8 @@ final class InventoryService
 
         $this->pdo->beginTransaction();
         try {
-            $item = $this->loadItem($householdId, $itemId);
-            $source = $this->loadLot($householdId, $itemId, $locationId);
+            $item = $this->loadItem($householdId, $itemId, true);
+            $source = $this->loadLot($householdId, $itemId, $locationId, true);
             if ($item === null || $source === null) {
                 $this->pdo->rollBack();
                 return $this->failure('unknown_item', "I don't have that item yet.");
@@ -145,14 +145,18 @@ final class InventoryService
             $destinationId = $destination['locationId'];
             $destinationQuantity = $quantity;
             if ($destinationId !== $locationId) {
-                $destinationLot = $this->loadLot($householdId, $itemId, $destinationId);
-                $destinationQuantity += $destinationLot['quantity'] ?? 0;
-                if ($destinationQuantity > 0 || $destinationLot !== null) {
-                    $this->setLotQuantity(
+                $destinationLot = $this->loadLot(
+                    $householdId,
+                    $itemId,
+                    $destinationId,
+                    true,
+                );
+                if ($quantity > 0 || $destinationLot !== null) {
+                    $destinationQuantity = $this->addLotQuantity(
                         $householdId,
                         $itemId,
                         $destinationId,
-                        $destinationQuantity,
+                        $quantity,
                     );
                 }
                 $this->setLotQuantity($householdId, $itemId, $locationId, 0);
@@ -197,10 +201,16 @@ final class InventoryService
     }
 
     /** @return array{name: string}|null */
-    private function loadItem(string $householdId, string $itemId): ?array
+    private function loadItem(
+        string $householdId,
+        string $itemId,
+        bool $forUpdate = false,
+    ): ?array
     {
+        $lock = $this->lockClause($forUpdate);
         $statement = $this->pdo->prepare(
-            'SELECT name FROM items WHERE id = :id AND household_id = :household_id',
+            'SELECT name FROM items
+             WHERE id = :id AND household_id = :household_id' . $lock,
         );
         $statement->execute(['id' => $itemId, 'household_id' => $householdId]);
         $row = $statement->fetch();
@@ -208,14 +218,20 @@ final class InventoryService
     }
 
     /** @return array{quantity: int}|null */
-    private function loadLot(string $householdId, string $itemId, string $locationId): ?array
+    private function loadLot(
+        string $householdId,
+        string $itemId,
+        string $locationId,
+        bool $forUpdate = false,
+    ): ?array
     {
+        $lock = $this->lockClause($forUpdate);
         $statement = $this->pdo->prepare(
             'SELECT quantity
              FROM stock_lots
              WHERE household_id = :household_id
                AND item_id = :item_id
-               AND location_id = :location_id',
+               AND location_id = :location_id' . $lock,
         );
         $statement->execute([
             'household_id' => $householdId,
@@ -224,6 +240,13 @@ final class InventoryService
         ]);
         $row = $statement->fetch();
         return is_array($row) ? ['quantity' => (int) $row['quantity']] : null;
+    }
+
+    private function lockClause(bool $forUpdate): string
+    {
+        return $forUpdate && $this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql'
+            ? ' FOR UPDATE'
+            : '';
     }
 
     private function hasItemName(string $householdId, string $name, string $exceptId): bool
@@ -341,6 +364,36 @@ final class InventoryService
             'put_away_count' => $quantity > 0 ? 1 : 0,
             'last_activity_at' => $this->now(),
         ]);
+    }
+
+    private function addLotQuantity(
+        string $householdId,
+        string $itemId,
+        string $locationId,
+        int $quantity,
+    ): int {
+        $existing = $this->loadLot($householdId, $itemId, $locationId, true);
+        if ($existing === null) {
+            $this->setLotQuantity($householdId, $itemId, $locationId, $quantity);
+            return $quantity;
+        }
+
+        $statement = $this->pdo->prepare(
+            'UPDATE stock_lots
+             SET quantity = quantity + :quantity, last_activity_at = :last_activity_at
+             WHERE household_id = :household_id
+               AND item_id = :item_id
+               AND location_id = :location_id',
+        );
+        $statement->execute([
+            'quantity' => $quantity,
+            'last_activity_at' => $this->now(),
+            'household_id' => $householdId,
+            'item_id' => $itemId,
+            'location_id' => $locationId,
+        ]);
+        $updated = $this->loadLot($householdId, $itemId, $locationId, true);
+        return $updated['quantity'] ?? $quantity;
     }
 
     private function readableName(string $name): string

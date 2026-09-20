@@ -10,6 +10,42 @@ use Putaway\Inventory\InventoryController;
 use Putaway\Inventory\InventoryService;
 use Putaway\Inventory\LocationService;
 
+final class InventoryLockRecordingStatement extends PDOStatement
+{
+    public function execute(?array $params = null): bool
+    {
+        return true;
+    }
+
+    public function fetch(
+        int $mode = PDO::FETCH_DEFAULT,
+        int $cursorOrientation = PDO::FETCH_ORI_NEXT,
+        int $cursorOffset = 0,
+    ): mixed {
+        return ['quantity' => 1];
+    }
+}
+
+final class InventoryLockRecordingPdo extends PDO
+{
+    public string $lastSql = '';
+
+    public function __construct(private readonly string $driver)
+    {
+    }
+
+    public function getAttribute(int $attribute): mixed
+    {
+        return $attribute === PDO::ATTR_DRIVER_NAME ? $this->driver : null;
+    }
+
+    public function prepare(string $query, array $options = []): PDOStatement|false
+    {
+        $this->lastSql = $query;
+        return new InventoryLockRecordingStatement();
+    }
+}
+
 final class InventoryServiceTest extends TestCase
 {
     private PDO $pdo;
@@ -190,6 +226,30 @@ final class InventoryServiceTest extends TestCase
         self::assertSame(10, $result['quantity']);
         self::assertSame(0, $this->quantityAt('cabinet'));
         self::assertSame(10, $this->quantityAt('attic'));
+    }
+
+    public function test_edit_lot_uses_mysql_row_locks_with_sqlite_transaction_fallback(): void
+    {
+        $mysql = new InventoryLockRecordingPdo('mysql');
+        $mysqlHouseholds = new HouseholdService($mysql);
+        $mysqlInventory = new InventoryService(
+            $mysql,
+            $mysqlHouseholds,
+            new LocationService($mysql, $mysqlHouseholds),
+        );
+        $loadLot = new ReflectionMethod($mysqlInventory, 'loadLot');
+        $loadLot->invoke($mysqlInventory, 'home', 'hats', 'cabinet', true);
+        self::assertStringEndsWith('FOR UPDATE', trim($mysql->lastSql));
+
+        $sqlite = new InventoryLockRecordingPdo('sqlite');
+        $sqliteHouseholds = new HouseholdService($sqlite);
+        $sqliteInventory = new InventoryService(
+            $sqlite,
+            $sqliteHouseholds,
+            new LocationService($sqlite, $sqliteHouseholds),
+        );
+        $loadLot->invoke($sqliteInventory, 'home', 'hats', 'cabinet', true);
+        self::assertStringNotContainsString('FOR UPDATE', $sqlite->lastSql);
     }
 
     public function test_controller_validates_body_and_maps_domain_errors(): void

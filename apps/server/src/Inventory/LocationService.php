@@ -8,6 +8,7 @@ use DateTimeZone;
 use PDO;
 use Putaway\Auth\Uuid;
 use Putaway\Households\HouseholdService;
+use Throwable;
 
 final class LocationService
 {
@@ -134,39 +135,12 @@ final class LocationService
         string $locationId,
         string $name,
     ): array {
-        if (!$this->isOwner($userId, $householdId)) {
-            return $this->failure('forbidden');
-        }
-
-        $location = $this->loadLocation($householdId, $locationId);
-        if ($location === null) {
-            return $this->failure('forbidden');
-        }
-        if ($location['archived_at'] !== null) {
-            return $this->failure('archived');
-        }
-
-        $name = trim($name);
-        if ($name === '' || $this->hasSiblingName(
+        return $this->updateLocation(
+            $userId,
             $householdId,
-            $location['parent_id'],
-            $name,
             $locationId,
-        )) {
-            return $this->failure('duplicate_name');
-        }
-
-        $statement = $this->pdo->prepare(
-            'UPDATE locations SET name = :name, updated_at = :updated_at
-             WHERE id = :id AND household_id = :household_id',
+            ['name' => $name],
         );
-        $statement->execute([
-            'name' => $name,
-            'updated_at' => $this->now(),
-            'id' => $locationId,
-            'household_id' => $householdId,
-        ]);
-        return ['ok' => true];
     }
 
     /**
@@ -179,51 +153,94 @@ final class LocationService
         string $locationId,
         ?string $newParentId,
     ): array {
+        return $this->updateLocation(
+            $userId,
+            $householdId,
+            $locationId,
+            ['parentId' => $newParentId],
+        );
+    }
+
+    /**
+     * @param array{name?: string, parentId?: string|null} $changes
+     * @return array{ok: true}
+     *     |array{ok: false, code: 'forbidden'|'archived'|'duplicate_name'|'invalid_parent'}
+     */
+    public function updateLocation(
+        string $userId,
+        string $householdId,
+        string $locationId,
+        array $changes,
+    ): array {
         if (!$this->isOwner($userId, $householdId)) {
             return $this->failure('forbidden');
         }
 
-        $location = $this->loadLocation($householdId, $locationId);
-        if ($location === null) {
-            return $this->failure('forbidden');
-        }
-        if ($location['archived_at'] !== null) {
-            return $this->failure('archived');
-        }
-
-        if ($newParentId !== null) {
-            $parent = $this->loadLocation($householdId, $newParentId);
-            if ($parent === null) {
-                return $this->failure('invalid_parent');
+        $this->pdo->beginTransaction();
+        try {
+            $location = $this->loadLocation($householdId, $locationId, true);
+            if ($location === null) {
+                $this->pdo->rollBack();
+                return $this->failure('forbidden');
             }
-            if ($parent['archived_at'] !== null) {
+            if ($location['archived_at'] !== null) {
+                $this->pdo->rollBack();
                 return $this->failure('archived');
             }
-            if ($this->wouldCycle($householdId, $locationId, $newParentId)) {
-                return $this->failure('invalid_parent');
+
+            $name = array_key_exists('name', $changes)
+                ? trim((string) $changes['name'])
+                : $location['name'];
+            $newParentId = array_key_exists('parentId', $changes)
+                ? $changes['parentId']
+                : $location['parent_id'];
+
+            if ($newParentId !== null) {
+                $parent = $this->loadLocation($householdId, $newParentId, true);
+                if ($parent === null) {
+                    $this->pdo->rollBack();
+                    return $this->failure('invalid_parent');
+                }
+                if ($parent['archived_at'] !== null) {
+                    $this->pdo->rollBack();
+                    return $this->failure('archived');
+                }
+                if ($this->wouldCycle($householdId, $locationId, $newParentId)) {
+                    $this->pdo->rollBack();
+                    return $this->failure('invalid_parent');
+                }
             }
-        }
 
-        if ($this->hasSiblingName(
-            $householdId,
-            $newParentId,
-            $location['name'],
-            $locationId,
-        )) {
-            return $this->failure('duplicate_name');
-        }
+            if ($name === '' || $this->hasSiblingName(
+                $householdId,
+                $newParentId,
+                $name,
+                $locationId,
+            )) {
+                $this->pdo->rollBack();
+                return $this->failure('duplicate_name');
+            }
 
-        $statement = $this->pdo->prepare(
-            'UPDATE locations SET parent_id = :parent_id, updated_at = :updated_at
-             WHERE id = :id AND household_id = :household_id',
-        );
-        $statement->execute([
-            'parent_id' => $newParentId,
-            'updated_at' => $this->now(),
-            'id' => $locationId,
-            'household_id' => $householdId,
-        ]);
-        return ['ok' => true];
+            $statement = $this->pdo->prepare(
+                'UPDATE locations
+                 SET name = :name, parent_id = :parent_id, updated_at = :updated_at
+                 WHERE id = :id AND household_id = :household_id',
+            );
+            $statement->execute([
+                'name' => $name,
+                'parent_id' => $newParentId,
+                'updated_at' => $this->now(),
+                'id' => $locationId,
+                'household_id' => $householdId,
+            ]);
+            $this->pdo->commit();
+            return ['ok' => true];
+        } catch (Throwable $error) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $error;
+        }
     }
 
     private function isOwner(string $userId, string $householdId): bool
@@ -235,12 +252,19 @@ final class LocationService
     /**
      * @return array{id: string, parent_id: string|null, name: string, archived_at: string|null}|null
      */
-    private function loadLocation(string $householdId, string $locationId): ?array
+    private function loadLocation(
+        string $householdId,
+        string $locationId,
+        bool $forUpdate = false,
+    ): ?array
     {
+        $lock = $forUpdate && $this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql'
+            ? ' FOR UPDATE'
+            : '';
         $statement = $this->pdo->prepare(
             'SELECT id, parent_id, name, archived_at
              FROM locations
-             WHERE id = :id AND household_id = :household_id',
+             WHERE id = :id AND household_id = :household_id' . $lock,
         );
         $statement->execute(['id' => $locationId, 'household_id' => $householdId]);
         $row = $statement->fetch();

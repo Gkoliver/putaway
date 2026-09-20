@@ -24,6 +24,9 @@ describe("magicTokenFromCallbackUrl", () => {
     expect(
       magicTokenFromCallbackUrl("https://put-away.com/auth/verify?token=magic123"),
     ).toBe("magic123");
+    expect(
+      magicTokenFromCallbackUrl("putaway://auth/verify?token=magic-app"),
+    ).toBe("magic-app");
     expect(magicTokenFromCallbackUrl("putaway:///?token=magic456")).toBe("magic456");
   });
 

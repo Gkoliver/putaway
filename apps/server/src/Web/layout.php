@@ -21,7 +21,9 @@ function csrfCookie(string $token): string
 function layout(string $title, string $content, bool $signedIn = false): string
 {
     $navigation = $signedIn
-        ? '<nav><a href="/inventory">Inventory</a><a href="/places">Places</a></nav>'
+        ? '<nav><a href="/inventory">Inventory</a><a href="/places">Places</a>'
+            . '<form method="post" action="/sign-out"><button type="submit" class="link-button">'
+            . 'Sign out</button></form></nav>'
         : '';
 
     return '<!doctype html>
@@ -33,11 +35,12 @@ function layout(string $title, string $content, bool $signedIn = false): string
 <style>
 :root{font-family:system-ui,sans-serif;color:#17211b;background:#f4f7f4}
 *{box-sizing:border-box}body{margin:0}header,main{max-width:960px;margin:auto;padding:1rem}
-header{display:flex;justify-content:space-between;align-items:center}nav{display:flex;gap:1rem}
+header{display:flex;justify-content:space-between;align-items:center}nav{display:flex;gap:1rem;align-items:center}
 a{color:#17633a}section,.card{background:#fff;border:1px solid #dbe4dc;border-radius:.75rem;padding:1rem;margin-bottom:1rem}
 form{display:flex;gap:.65rem;align-items:end;flex-wrap:wrap}label{display:grid;gap:.25rem;flex:1;min-width:10rem}
 input,select,button{font:inherit;padding:.6rem;border:1px solid #a9b7ac;border-radius:.45rem}
-button{background:#17633a;color:white;border-color:#17633a;cursor:pointer}.muted{color:#637168}
+button{background:#17633a;color:white;border-color:#17633a;cursor:pointer}
+.link-button{background:none;color:#17633a;border:0;padding:0}.muted{color:#637168}
 .notice{padding:.75rem;background:#e6f4ea;border-radius:.5rem}.error{background:#fde8e8;color:#842323}
 .grid{display:grid;gap:.75rem}.place{margin-left:calc(var(--depth) * 1.25rem)}
 @media(max-width:600px){header{align-items:flex-start}form>*{width:100%}}
