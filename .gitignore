@@ -7,3 +7,4 @@ node_modules/
 .next/
 apps/server/config/config.php
 apps/server/vendor/
+apps/server/.phpunit.result.cache
