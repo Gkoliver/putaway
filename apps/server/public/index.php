@@ -6,6 +6,11 @@ require_once __DIR__ . '/../src/bootstrap.php';
 use Putaway\Auth\AuthController;
 use Putaway\Auth\AuthService;
 use Putaway\Auth\PhpMailMailer;
+use Putaway\Commands\CommandController;
+use Putaway\Commands\CommandHandler;
+use Putaway\Commands\Interpreter;
+use Putaway\Commands\OpenAiClient;
+use Putaway\Commands\ReceiptStore;
 use Putaway\Db;
 use Putaway\Households\HouseholdController;
 use Putaway\Households\HouseholdService;
@@ -35,6 +40,18 @@ $locations = new LocationController(
 );
 $inventory = new InventoryController(
     new InventoryService(Db::pdo(), $householdService, $locationService),
+    $authService,
+);
+$openAi = new OpenAiClient((string) ($config['openai_api_key'] ?? ''));
+$commands = new CommandController(
+    new CommandHandler(
+        Db::pdo(),
+        $householdService,
+        new ReceiptStore(Db::pdo()),
+        [$openAi, 'suggestItems'],
+    ),
+    new Interpreter([$openAi, 'extract']),
+    $openAi,
     $authService,
 );
 
@@ -85,6 +102,7 @@ $router->add(
     fn (Request $request, array $params) =>
         $inventory->editInventory($request, $params['householdId']),
 );
+$router->add('POST', '/api/commands', fn (Request $request) => $commands->submit($request));
 
 $request = Request::fromGlobals();
 $response = $router->dispatch($request);

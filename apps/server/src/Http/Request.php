@@ -12,6 +12,8 @@ final class Request
         private array $headers = [],
         private string $body = '',
         private array $query = [],
+        private array $form = [],
+        private array $files = [],
     ) {}
 
     public static function fromGlobals(): self
@@ -23,7 +25,15 @@ final class Request
         $headers = self::headersFromServer($_SERVER);
         $body = file_get_contents('php://input') ?: '';
 
-        return new self($method, $path, $headers, $body, is_array($query) ? $query : []);
+        return new self(
+            $method,
+            $path,
+            $headers,
+            $body,
+            is_array($query) ? $query : [],
+            is_array($_POST) ? $_POST : [],
+            is_array($_FILES) ? $_FILES : [],
+        );
     }
 
     /**
@@ -86,11 +96,25 @@ final class Request
         return null;
     }
 
-    public static function fake(string $method, string $path, array $headers = [], string $body = ''): self
-    {
+    public static function fake(
+        string $method,
+        string $path,
+        array $headers = [],
+        string $body = '',
+        array $form = [],
+        array $files = [],
+    ): self {
         $requestPath = parse_url($path, PHP_URL_PATH) ?? $path;
         parse_str((string) parse_url($path, PHP_URL_QUERY), $query);
-        return new self($method, $requestPath, $headers, $body, is_array($query) ? $query : []);
+        return new self(
+            $method,
+            $requestPath,
+            $headers,
+            $body,
+            is_array($query) ? $query : [],
+            $form,
+            $files,
+        );
     }
 
     public function header(string $name): ?string
@@ -133,6 +157,10 @@ final class Request
 
     public function bodyParam(string $name): ?string
     {
+        if (array_key_exists($name, $this->form)) {
+            $value = $this->form[$name];
+            return is_scalar($value) ? (string) $value : null;
+        }
         parse_str($this->body, $params);
         if (!is_array($params) || !array_key_exists($name, $params)) {
             return null;
@@ -140,6 +168,29 @@ final class Request
 
         $value = $params[$name];
         return is_scalar($value) ? (string) $value : null;
+    }
+
+    /** @return array{tmp_name: string, name: string, type: string, error: int, size: int}|null */
+    public function uploadedFile(string $name): ?array
+    {
+        $file = $this->files[$name] ?? null;
+        if (
+            !is_array($file)
+            || !is_string($file['tmp_name'] ?? null)
+            || !is_string($file['name'] ?? null)
+            || !is_string($file['type'] ?? null)
+            || !is_int($file['error'] ?? null)
+            || !is_int($file['size'] ?? null)
+        ) {
+            return null;
+        }
+        return [
+            'tmp_name' => $file['tmp_name'],
+            'name' => $file['name'],
+            'type' => $file['type'],
+            'error' => $file['error'],
+            'size' => $file['size'],
+        ];
     }
 
     public function queryParam(string $name): ?string
