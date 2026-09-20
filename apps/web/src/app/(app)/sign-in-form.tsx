@@ -29,19 +29,19 @@ export function SignInForm({ callbackURL = "/inventory" }: { callbackURL?: strin
   }
 
   if (sent) {
-    return (
-      <div>
-        <p>No email is sent in local dev. Use the sign-in link below.</p>
-        {devLink ? (
+    if (devLink) {
+      return (
+        <div>
+          <p>No email is sent in local dev. Use the sign-in link below.</p>
           <p>
             <a href={devLink}>Open sign-in link</a>
           </p>
-        ) : (
-          <p>
-            Link was not captured. In the Next.js terminal, copy the line starting with
-            &quot;Magic link for&quot; and paste it in this browser.
-          </p>
-        )}
+        </div>
+      );
+    }
+    return (
+      <div>
+        <p>Check your email for a sign-in link.</p>
       </div>
     );
   }
