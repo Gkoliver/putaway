@@ -11,16 +11,19 @@ final class Request
         public readonly string $path,
         private array $headers = [],
         private string $body = '',
+        private array $query = [],
     ) {}
 
     public static function fromGlobals(): self
     {
         $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
-        $path = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?? '/';
+        $uri = $_SERVER['REQUEST_URI'] ?? '/';
+        $path = parse_url($uri, PHP_URL_PATH) ?? '/';
+        parse_str((string) parse_url($uri, PHP_URL_QUERY), $query);
         $headers = self::headersFromServer($_SERVER);
         $body = file_get_contents('php://input') ?: '';
 
-        return new self($method, $path, $headers, $body);
+        return new self($method, $path, $headers, $body, is_array($query) ? $query : []);
     }
 
     /**
@@ -85,7 +88,9 @@ final class Request
 
     public static function fake(string $method, string $path, array $headers = [], string $body = ''): self
     {
-        return new self($method, $path, $headers, $body);
+        $requestPath = parse_url($path, PHP_URL_PATH) ?? $path;
+        parse_str((string) parse_url($path, PHP_URL_QUERY), $query);
+        return new self($method, $requestPath, $headers, $body, is_array($query) ? $query : []);
     }
 
     public function header(string $name): ?string
@@ -134,6 +139,16 @@ final class Request
         }
 
         $value = $params[$name];
+        return is_scalar($value) ? (string) $value : null;
+    }
+
+    public function queryParam(string $name): ?string
+    {
+        if (!array_key_exists($name, $this->query)) {
+            return null;
+        }
+
+        $value = $this->query[$name];
         return is_scalar($value) ? (string) $value : null;
     }
 }
