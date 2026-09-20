@@ -10,6 +10,8 @@ use Putaway\Db;
 use Putaway\Households\HouseholdController;
 use Putaway\Households\HouseholdService;
 use Putaway\Http\Request;
+use Putaway\Inventory\InventoryController;
+use Putaway\Inventory\InventoryService;
 use Putaway\Inventory\LocationController;
 use Putaway\Inventory\LocationService;
 use Putaway\Router;
@@ -26,8 +28,13 @@ $authService = new AuthService(
 $auth = new AuthController($authService);
 $householdService = new HouseholdService(Db::pdo());
 $households = new HouseholdController($householdService, $authService);
+$locationService = new LocationService(Db::pdo(), $householdService);
 $locations = new LocationController(
-    new LocationService(Db::pdo(), $householdService),
+    $locationService,
+    $authService,
+);
+$inventory = new InventoryController(
+    new InventoryService(Db::pdo(), $householdService, $locationService),
     $authService,
 );
 
@@ -65,6 +72,18 @@ $router->add(
     '/api/households/{householdId}/locations',
     fn (Request $request, array $params) =>
         $locations->updateLocation($request, $params['householdId']),
+);
+$router->add(
+    'GET',
+    '/api/households/{householdId}/inventory',
+    fn (Request $request, array $params) =>
+        $inventory->listInventory($request, $params['householdId']),
+);
+$router->add(
+    'PATCH',
+    '/api/households/{householdId}/inventory',
+    fn (Request $request, array $params) =>
+        $inventory->editInventory($request, $params['householdId']),
 );
 
 $request = Request::fromGlobals();
