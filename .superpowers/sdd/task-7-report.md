@@ -40,6 +40,25 @@ git diff --check: clean
 - OpenAI behavior is verified through injected HTTP stubs; no real provider request is made in tests.
 - Multipart upload handling is covered with a synthetic uploaded-file request, not a web-server integration test.
 - Handler tests intentionally use SQLite; production MySQL schema compatibility is exercised by portable SQL but not by a MySQL integration suite.
+
+## Review fixes
+
+Critical and Important review findings were addressed:
+
+- `which_item` and `which_location` clarifications now preserve the original command.
+- Selected `itemId` and `locationId` values are validated within the household and applied directly.
+- Controller preflight checks membership and existing receipts before transcription or extraction.
+- Handler rechecks receipts inside the transaction and recovers an existing receipt after a duplicate-insert race.
+- Existing lot changes use atomic SQL quantity updates, including clamped take-out.
+- Command 401 responses now use the `CommandOutcome` error shape.
+
+Post-review verification:
+
+```text
+PHPUnit: OK (45 tests, 135 assertions)
+PHP syntax: no errors in changed production and test files
+IDE diagnostics: no linter errors
+```
 # Task 7 Report: Command handler
 
 **Status:** DONE_WITH_CONCERNS  

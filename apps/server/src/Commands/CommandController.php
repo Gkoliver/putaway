@@ -22,7 +22,11 @@ final class CommandController
     {
         $userId = $this->auth->userIdForBearer($request->bearerToken());
         if ($userId === null) {
-            return Response::json(['error' => 'unauthorized'], 401);
+            return Response::json([
+                'type' => 'error',
+                'code' => 'forbidden',
+                'spoken' => 'Sign in required.',
+            ], 401);
         }
 
         $json = $request->json();
@@ -30,6 +34,10 @@ final class CommandController
         $clientCommandId = $this->inputString($json, $request, 'clientCommandId');
         if ($householdId === null || $clientCommandId === null) {
             return Response::json($this->notCaught(), 400);
+        }
+        $preflight = $this->handler->preflight($userId, $householdId, $clientCommandId);
+        if ($preflight !== null) {
+            return Response::json($preflight);
         }
 
         $command = $json['command'] ?? null;

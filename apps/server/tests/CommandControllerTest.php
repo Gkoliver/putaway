@@ -102,6 +102,11 @@ final class CommandControllerTest extends TestCase
             json_encode($body, JSON_THROW_ON_ERROR),
         ));
         self::assertSame(401, $unauthorized->status);
+        self::assertSame([
+            'type' => 'error',
+            'code' => 'forbidden',
+            'spoken' => 'Sign in required.',
+        ], $this->json($unauthorized->body));
 
         $response = $controller->submit(Request::fake(
             'POST',
@@ -144,6 +149,103 @@ final class CommandControllerTest extends TestCase
             'code' => 'voice_unavailable',
             'spoken' => 'Voice is unavailable — type it instead.',
         ], $this->json($response->body));
+    }
+
+    public function test_membership_is_rejected_before_audio_or_extract_calls(): void
+    {
+        $calls = 0;
+        $openAi = new OpenAiClient('test', static function (
+            string $method,
+            string $url,
+        ) use (&$calls): array {
+            $calls++;
+            return str_contains($url, '/audio/')
+                ? ['text' => 'put hats in cabinet']
+                : ['choices' => [['message' => ['content' => json_encode([
+                    'intent' => 'find',
+                    'itemText' => 'hats',
+                    'quantity' => null,
+                    'locationPath' => null,
+                    'items' => null,
+                ], JSON_THROW_ON_ERROR)]]]];
+        });
+        $controller = new CommandController(
+            $this->handler,
+            new Interpreter([$openAi, 'extract']),
+            $openAi,
+            $this->auth,
+        );
+
+        $audio = $controller->submit(Request::fake(
+            'POST',
+            '/api/commands',
+            ['Authorization' => 'Bearer token', 'Content-Type' => 'multipart/form-data'],
+            form: ['householdId' => 'other', 'clientCommandId' => 'audio-forbidden'],
+            files: ['audio' => [
+                'tmp_name' => '/tmp/clip.m4a',
+                'name' => 'clip.m4a',
+                'type' => 'audio/mp4',
+                'error' => UPLOAD_ERR_OK,
+                'size' => 10,
+            ]],
+        ));
+        $extract = $controller->submit(Request::fake(
+            'POST',
+            '/api/commands',
+            ['Authorization' => 'Bearer token', 'Content-Type' => 'application/json'],
+            json_encode([
+                'householdId' => 'other',
+                'clientCommandId' => 'extract-forbidden',
+                'transcript' => 'unparseable speech',
+            ], JSON_THROW_ON_ERROR),
+        ));
+
+        self::assertSame('forbidden', $this->json($audio->body)['code']);
+        self::assertSame('forbidden', $this->json($extract->body)['code']);
+        self::assertSame(0, $calls);
+    }
+
+    public function test_receipt_replay_skips_interpreter_and_returns_same_result(): void
+    {
+        $calls = 0;
+        $openAi = new OpenAiClient('test', static function () use (&$calls): array {
+            $calls++;
+            throw new RuntimeException('must not be called');
+        });
+        $controller = new CommandController(
+            $this->handler,
+            new Interpreter([$openAi, 'extract']),
+            $openAi,
+            $this->auth,
+        );
+        $headers = ['Authorization' => 'Bearer token', 'Content-Type' => 'application/json'];
+        $first = $controller->submit(Request::fake(
+            'POST',
+            '/api/commands',
+            $headers,
+            json_encode([
+                'householdId' => 'home',
+                'clientCommandId' => 'replay-before-openai',
+                'command' => [
+                    'intent' => 'find',
+                    'itemText' => 'hats',
+                    'quantity' => 1,
+                ],
+            ], JSON_THROW_ON_ERROR),
+        ));
+        $replay = $controller->submit(Request::fake(
+            'POST',
+            '/api/commands',
+            $headers,
+            json_encode([
+                'householdId' => 'home',
+                'clientCommandId' => 'replay-before-openai',
+                'transcript' => 'unparseable speech',
+            ], JSON_THROW_ON_ERROR),
+        ));
+
+        self::assertSame($this->json($first->body), $this->json($replay->body));
+        self::assertSame(0, $calls);
     }
 
     /** @return array<string, mixed> */

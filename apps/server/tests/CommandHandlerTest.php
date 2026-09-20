@@ -133,5 +133,73 @@ final class CommandHandlerTest extends TestCase
         self::assertSame('which_item', $result['clarification']['type']);
         self::assertSame('paper', $result['clarification']['candidates'][0]['itemId']);
         self::assertSame('kitchen roll', $calls[0][0]);
+        self::assertSame('kitchen roll', $result['command']['itemText']);
+    }
+
+    public function test_selected_item_id_applies_without_reclarifying(): void
+    {
+        $this->pdo->exec(
+            "INSERT INTO stock_lots VALUES
+                ('lot-paper', 'home', 'paper', 'cabinet', 3, 1, '2026-09-20 12:00:00');",
+        );
+        $calls = 0;
+        $handler = new CommandHandler(
+            $this->pdo,
+            new HouseholdService($this->pdo),
+            new ReceiptStore($this->pdo),
+            static function () use (&$calls): array {
+                $calls++;
+                return [['itemId' => 'paper', 'name' => 'Paper Towels']];
+            },
+        );
+        $result = $handler->handle('member', 'home', 'selected-item', [
+            'intent' => 'take_out',
+            'itemText' => 'kitchen roll',
+            'itemId' => 'paper',
+            'locationId' => 'cabinet',
+            'quantity' => 1,
+        ]);
+
+        self::assertSame('ok', $result['type']);
+        self::assertSame('paper', $result['itemId']);
+        self::assertSame(2, $result['lots'][0]['quantity']);
+        self::assertSame(0, $calls);
+    }
+
+    public function test_which_location_includes_command_and_selected_location_applies(): void
+    {
+        $this->pdo->exec(
+            "INSERT INTO locations VALUES ('attic', 'home', NULL, 'Attic', NULL);
+             INSERT INTO stock_lots VALUES
+                ('lot-attic', 'home', 'hats', 'attic', 2, 1, '2026-09-20 12:00:00');",
+        );
+        $command = [
+            'intent' => 'take_out',
+            'itemText' => 'hats',
+            'quantity' => 1,
+        ];
+        $clarification = $this->handler->handle(
+            'member',
+            'home',
+            'choose-location',
+            $command,
+        );
+
+        self::assertSame('which_location', $clarification['clarification']['type']);
+        self::assertSame($command, $clarification['command']);
+
+        $selected = $command + ['locationId' => 'attic'];
+        $result = $this->handler->handle('member', 'home', 'chosen-location', $selected);
+        self::assertSame('ok', $result['type']);
+        self::assertSame(1, $this->quantityAt('hats', 'attic'));
+    }
+
+    private function quantityAt(string $itemId, string $locationId): int
+    {
+        $statement = $this->pdo->prepare(
+            'SELECT quantity FROM stock_lots WHERE item_id = :item_id AND location_id = :location_id',
+        );
+        $statement->execute(['item_id' => $itemId, 'location_id' => $locationId]);
+        return (int) $statement->fetchColumn();
     }
 }

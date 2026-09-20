@@ -7,6 +7,7 @@ use Closure;
 use DateTimeImmutable;
 use DateTimeZone;
 use PDO;
+use PDOException;
 use Putaway\Auth\Uuid;
 use Putaway\Households\HouseholdService;
 use Throwable;
@@ -32,16 +33,18 @@ final class CommandHandler
         string $clientCommandId,
         array $command,
     ): array {
-        if ($this->households->requireMembership($userId, $householdId) === null) {
-            return $this->error('forbidden', "You don't have access to that household.");
-        }
-        $receipt = $this->receipts->find($householdId, $userId, $clientCommandId);
-        if ($receipt !== null) {
-            return $receipt;
+        $preflight = $this->preflight($userId, $householdId, $clientCommandId);
+        if ($preflight !== null) {
+            return $preflight;
         }
 
         $this->pdo->beginTransaction();
         try {
+            $receipt = $this->receipts->find($householdId, $userId, $clientCommandId);
+            if ($receipt !== null) {
+                $this->pdo->commit();
+                return $receipt;
+            }
             $result = $this->apply($householdId, $command);
             $this->receipts->save($householdId, $userId, $clientCommandId, $result);
             $this->pdo->commit();
@@ -50,8 +53,26 @@ final class CommandHandler
             if ($this->pdo->inTransaction()) {
                 $this->pdo->rollBack();
             }
+            if ($this->isUniqueViolation($error)) {
+                $receipt = $this->receipts->find($householdId, $userId, $clientCommandId);
+                if ($receipt !== null) {
+                    return $receipt;
+                }
+            }
             throw $error;
         }
+    }
+
+    /** @return array<string, mixed>|null */
+    public function preflight(
+        string $userId,
+        string $householdId,
+        string $clientCommandId,
+    ): ?array {
+        if ($this->households->requireMembership($userId, $householdId) === null) {
+            return $this->error('forbidden', "You don't have access to that household.");
+        }
+        return $this->receipts->find($householdId, $userId, $clientCommandId);
     }
 
     /** @param array<string, mixed> $command @return array<string, mixed> */
@@ -70,17 +91,29 @@ final class CommandHandler
             return $this->error('not_caught', "I didn't catch that.");
         }
 
-        $item = $this->resolveItem($householdId, $itemText, $intent === 'put_away');
+        $item = $this->resolveCommandItem(
+            $householdId,
+            $itemText,
+            $intent === 'put_away',
+            $command,
+        );
         if (($item['type'] ?? null) !== 'resolved') {
             return $item;
         }
 
         if ($intent === 'put_away') {
-            $path = $this->stringList($command['locationPath'] ?? null);
-            if ($path === []) {
-                return $this->error('unknown_location', "I don't have a place called that place.");
+            if (is_string($command['locationId'] ?? null)) {
+                $location = $this->resolveLocationId($householdId, $command['locationId']);
+                if (($location['type'] ?? null) === 'error') {
+                    return $location;
+                }
+            } else {
+                $path = $this->stringList($command['locationPath'] ?? null);
+                if ($path === []) {
+                    return $this->error('unknown_location', "I don't have a place called that place.");
+                }
+                $location = $this->resolveLocation($householdId, $path, true);
             }
-            $location = $this->resolveLocation($householdId, $path, true);
             $quantityNow = $this->changeLot(
                 $householdId,
                 $item['itemId'],
@@ -100,8 +133,19 @@ final class CommandHandler
             return $this->findOutcome($item, $lots, $intent);
         }
 
-        $requestedPath = $this->stringList($command['locationPath'] ?? null);
-        if ($requestedPath !== []) {
+        if (is_string($command['locationId'] ?? null)) {
+            $location = $this->resolveLocationId($householdId, $command['locationId']);
+            if (($location['type'] ?? null) === 'error') {
+                return $location;
+            }
+            $target = $this->lotAt($lots, $location['locationId']) ?? [
+                'locationId' => $location['locationId'],
+                'pathLabel' => $location['pathLabel'],
+                'quantity' => 0,
+                'putAwayCount' => 0,
+                'lastActivityAt' => '',
+            ];
+        } elseif (($requestedPath = $this->stringList($command['locationPath'] ?? null)) !== []) {
             $location = $this->resolveLocation($householdId, $requestedPath, false);
             if (($location['type'] ?? null) === 'error') {
                 return $location;
@@ -122,6 +166,7 @@ final class CommandHandler
                         $candidates,
                     )) . '?',
                     'clarification' => ['type' => 'which_location', 'candidates' => $candidates],
+                    'command' => $command,
                 ];
             }
             $target = $inStock[0] ?? $this->usualLot($lots);
@@ -250,6 +295,39 @@ final class CommandHandler
         return ['type' => 'resolved', 'itemId' => $itemId, 'name' => $name];
     }
 
+    /** @param array<string, mixed> $command @return array<string, mixed> */
+    private function resolveCommandItem(
+        string $householdId,
+        string $itemText,
+        bool $create,
+        array $command,
+    ): array {
+        if (is_string($command['itemId'] ?? null)) {
+            $statement = $this->pdo->prepare(
+                'SELECT id, name FROM items
+                 WHERE id = :id AND household_id = :household_id',
+            );
+            $statement->execute([
+                'id' => $command['itemId'],
+                'household_id' => $householdId,
+            ]);
+            $row = $statement->fetch();
+            if (!is_array($row)) {
+                return $this->error('unknown_item', "I don't have {$itemText} yet.");
+            }
+            return [
+                'type' => 'resolved',
+                'itemId' => (string) $row['id'],
+                'name' => (string) $row['name'],
+            ];
+        }
+        $result = $this->resolveItem($householdId, $itemText, $create);
+        if (($result['type'] ?? null) === 'clarification') {
+            $result['command'] = $command;
+        }
+        return $result;
+    }
+
     /** @param list<array{itemId: string, name: string}> $candidates @return array<string, mixed> */
     private function whichItem(string $itemText, array $candidates): array
     {
@@ -318,6 +396,24 @@ final class CommandHandler
         ];
     }
 
+    /** @return array<string, mixed> */
+    private function resolveLocationId(string $householdId, string $locationId): array
+    {
+        $statement = $this->pdo->prepare(
+            'SELECT id FROM locations
+             WHERE id = :id AND household_id = :household_id AND archived_at IS NULL',
+        );
+        $statement->execute(['id' => $locationId, 'household_id' => $householdId]);
+        if ($statement->fetchColumn() === false) {
+            return $this->error('unknown_location', "I don't have a place called that place.");
+        }
+        return [
+            'type' => 'resolved',
+            'locationId' => $locationId,
+            'pathLabel' => $this->locationLabel($householdId, $locationId),
+        ];
+    }
+
     private function changeLot(
         string $householdId,
         string $itemId,
@@ -337,16 +433,39 @@ final class CommandHandler
         $lot = $select->fetch();
         $quantity = max(0, (int) ($lot['quantity'] ?? 0) + $change);
         if (is_array($lot)) {
-            $update = $this->pdo->prepare(
-                'UPDATE stock_lots SET quantity = :quantity, put_away_count = :put_away_count,
-                    last_activity_at = :last_activity_at WHERE id = :id',
-            );
-            $update->execute([
-                'quantity' => $quantity,
-                'put_away_count' => (int) $lot['put_away_count'] + ($putAway ? 1 : 0),
-                'last_activity_at' => $this->now(),
-                'id' => $lot['id'],
-            ]);
+            if ($putAway) {
+                $update = $this->pdo->prepare(
+                    'UPDATE stock_lots
+                     SET quantity = quantity + :delta,
+                         put_away_count = put_away_count + 1,
+                         last_activity_at = :last_activity_at
+                     WHERE id = :id',
+                );
+                $update->execute([
+                    'delta' => $change,
+                    'last_activity_at' => $this->now(),
+                    'id' => $lot['id'],
+                ]);
+            } else {
+                $update = $this->pdo->prepare(
+                    'UPDATE stock_lots
+                     SET quantity = CASE
+                            WHEN quantity + :delta_floor < 0 THEN 0
+                            ELSE quantity + :delta_add
+                         END,
+                         last_activity_at = :last_activity_at
+                     WHERE id = :id',
+                );
+                $update->execute([
+                    'delta_floor' => $change,
+                    'delta_add' => $change,
+                    'last_activity_at' => $this->now(),
+                    'id' => $lot['id'],
+                ]);
+            }
+            $read = $this->pdo->prepare('SELECT quantity FROM stock_lots WHERE id = :id');
+            $read->execute(['id' => $lot['id']]);
+            $quantity = (int) $read->fetchColumn();
         } else {
             $insert = $this->pdo->prepare(
                 'INSERT INTO stock_lots
@@ -515,6 +634,21 @@ final class CommandHandler
     private function error(string $code, string $spoken): array
     {
         return ['type' => 'error', 'code' => $code, 'spoken' => $spoken];
+    }
+
+    private function isUniqueViolation(Throwable $error): bool
+    {
+        $current = $error;
+        while ($current !== null) {
+            if ($current instanceof PDOException) {
+                $sqlState = (string) ($current->errorInfo[0] ?? $current->getCode());
+                if (in_array($sqlState, ['19', '23000', '23505'], true)) {
+                    return true;
+                }
+            }
+            $current = $current->getPrevious();
+        }
+        return false;
     }
 
     private function now(): string
