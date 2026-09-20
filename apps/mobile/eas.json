@@ -5,6 +5,9 @@
   },
   "build": {
     "preview": {
+      "env": {
+        "EXPO_PUBLIC_API_BASE": "https://put-away.com"
+      },
       "ios": {
         "distribution": "store"
       },
