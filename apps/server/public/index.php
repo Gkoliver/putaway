@@ -10,6 +10,8 @@ use Putaway\Db;
 use Putaway\Households\HouseholdController;
 use Putaway\Households\HouseholdService;
 use Putaway\Http\Request;
+use Putaway\Inventory\LocationController;
+use Putaway\Inventory\LocationService;
 use Putaway\Router;
 
 $router = new Router();
@@ -22,7 +24,12 @@ $authService = new AuthService(
     $config['session_ttl_seconds'],
 );
 $auth = new AuthController($authService);
-$households = new HouseholdController(new HouseholdService(Db::pdo()), $authService);
+$householdService = new HouseholdService(Db::pdo());
+$households = new HouseholdController($householdService, $authService);
+$locations = new LocationController(
+    new LocationService(Db::pdo(), $householdService),
+    $authService,
+);
 
 $router->add('POST', '/api/auth/magic-link', fn (Request $request) => $auth->requestMagicLink($request));
 $router->add('GET', '/api/auth/verify', fn (Request $request) => $auth->verifyApi($request));
@@ -40,6 +47,24 @@ $router->add(
     'POST',
     '/api/households/invites/accept',
     fn (Request $request) => $households->acceptInvite($request),
+);
+$router->add(
+    'GET',
+    '/api/households/{householdId}/locations',
+    fn (Request $request, array $params) =>
+        $locations->listLocations($request, $params['householdId']),
+);
+$router->add(
+    'POST',
+    '/api/households/{householdId}/locations',
+    fn (Request $request, array $params) =>
+        $locations->createLocation($request, $params['householdId']),
+);
+$router->add(
+    'PATCH',
+    '/api/households/{householdId}/locations',
+    fn (Request $request, array $params) =>
+        $locations->updateLocation($request, $params['householdId']),
 );
 
 $request = Request::fromGlobals();
