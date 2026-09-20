@@ -15,11 +15,16 @@ use Putaway\Db;
 use Putaway\Households\HouseholdController;
 use Putaway\Households\HouseholdService;
 use Putaway\Http\Request;
+use Putaway\Http\Response;
 use Putaway\Inventory\InventoryController;
 use Putaway\Inventory\InventoryService;
 use Putaway\Inventory\LocationController;
 use Putaway\Inventory\LocationService;
 use Putaway\Router;
+use Putaway\Web\Csrf;
+use Putaway\Web\InventoryPage;
+use Putaway\Web\PlacesPage;
+use Putaway\Web\SignInController;
 
 $router = new Router();
 $config = require __DIR__ . '/../config/config.php';
@@ -38,10 +43,15 @@ $locations = new LocationController(
     $locationService,
     $authService,
 );
+$inventoryService = new InventoryService(Db::pdo(), $householdService, $locationService);
 $inventory = new InventoryController(
-    new InventoryService(Db::pdo(), $householdService, $locationService),
+    $inventoryService,
     $authService,
 );
+$csrf = new Csrf();
+$signInPage = new SignInController($authService, $csrf);
+$inventoryPage = new InventoryPage($authService, $householdService, $inventoryService, $csrf);
+$placesPage = new PlacesPage($authService, $householdService, $locationService, $csrf);
 $openAi = new OpenAiClient((string) ($config['openai_api_key'] ?? ''));
 $commands = new CommandController(
     new CommandHandler(
@@ -55,6 +65,19 @@ $commands = new CommandController(
     $authService,
 );
 
+$router->add('GET', '/', fn (Request $request) => new Response(302, '', [
+    'Location' => $authService->userIdForCookie($request->cookie('putaway_session')) === null
+        ? '/sign-in'
+        : '/inventory',
+]));
+$router->add('GET', '/sign-in', fn (Request $request) => $signInPage->show($request));
+$router->add('POST', '/sign-in', fn (Request $request) => $signInPage->submit($request));
+$router->add('GET', '/inventory', fn (Request $request) => $inventoryPage->show($request));
+$router->add('POST', '/inventory/edit', fn (Request $request) => $inventoryPage->edit($request));
+$router->add('GET', '/places', fn (Request $request) => $placesPage->show($request));
+$router->add('POST', '/places/create', fn (Request $request) => $placesPage->create($request));
+$router->add('POST', '/places/rename', fn (Request $request) => $placesPage->rename($request));
+$router->add('POST', '/places/reparent', fn (Request $request) => $placesPage->reparent($request));
 $router->add('POST', '/api/auth/magic-link', fn (Request $request) => $auth->requestMagicLink($request));
 $router->add('GET', '/api/auth/verify', fn (Request $request) => $auth->verifyApi($request));
 $router->add('GET', '/auth/verify', fn (Request $request) => $auth->verifyWeb($request));

@@ -144,6 +144,23 @@ final class Request
         return $matches[1];
     }
 
+    public function cookie(string $name): ?string
+    {
+        $header = $this->header('Cookie');
+        if ($header === null) {
+            return null;
+        }
+
+        foreach (explode(';', $header) as $cookie) {
+            $parts = explode('=', trim($cookie), 2);
+            if (count($parts) === 2 && $parts[0] === $name) {
+                return rawurldecode($parts[1]);
+            }
+        }
+
+        return null;
+    }
+
     /** @return array<string, mixed> */
     public function json(): array
     {

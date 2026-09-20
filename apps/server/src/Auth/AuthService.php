@@ -128,6 +128,11 @@ final class AuthService
         return $user['id'] ?? null;
     }
 
+    public function userIdForCookie(?string $token): ?string
+    {
+        return $this->userIdForBearer($token);
+    }
+
     /** @return array{id: string, email: string}|null */
     public function userForBearer(?string $token): ?array
     {
