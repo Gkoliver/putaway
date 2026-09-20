@@ -17,23 +17,70 @@ final class Request
     {
         $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
         $path = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?? '/';
+        $headers = self::headersFromServer($_SERVER);
+        $body = file_get_contents('php://input') ?: '';
 
+        return new self($method, $path, $headers, $body);
+    }
+
+    /**
+     * @param array<string, mixed> $server
+     * @return array<string, string>
+     */
+    public static function headersFromServer(array $server): array
+    {
         $headers = [];
-        foreach ($_SERVER as $key => $value) {
-            if (!is_string($value) || !str_starts_with($key, 'HTTP_')) {
+
+        if (function_exists('apache_request_headers')) {
+            $apacheHeaders = apache_request_headers();
+            if (is_array($apacheHeaders)) {
+                foreach ($apacheHeaders as $name => $value) {
+                    if (is_string($name) && is_string($value)) {
+                        $headers[$name] = $value;
+                    }
+                }
+            }
+        }
+
+        foreach ($server as $key => $value) {
+            if (!is_string($key) || !is_string($value) || !str_starts_with($key, 'HTTP_')) {
                 continue;
             }
             $name = str_replace('_', '-', substr($key, 5));
             $headers[$name] = $value;
         }
 
-        if (isset($_SERVER['CONTENT_TYPE']) && is_string($_SERVER['CONTENT_TYPE'])) {
-            $headers['CONTENT-TYPE'] = $_SERVER['CONTENT_TYPE'];
+        if (isset($server['CONTENT_TYPE']) && is_string($server['CONTENT_TYPE'])) {
+            $headers['CONTENT-TYPE'] = $server['CONTENT_TYPE'];
         }
 
-        $body = file_get_contents('php://input') ?: '';
+        if (self::headerValue($headers, 'Authorization') === null) {
+            foreach (['HTTP_AUTHORIZATION', 'REDIRECT_HTTP_AUTHORIZATION'] as $serverKey) {
+                if (!isset($server[$serverKey]) || !is_string($server[$serverKey]) || $server[$serverKey] === '') {
+                    continue;
+                }
+                $headers['Authorization'] = $server[$serverKey];
+                break;
+            }
+        }
 
-        return new self($method, $path, $headers, $body);
+        return $headers;
+    }
+
+    /**
+     * @param array<string, string> $headers
+     */
+    private static function headerValue(array $headers, string $name): ?string
+    {
+        $normalized = strtoupper(str_replace('-', '_', $name));
+
+        foreach ($headers as $headerName => $value) {
+            if (strtoupper(str_replace('-', '_', $headerName)) === $normalized) {
+                return $value;
+            }
+        }
+
+        return null;
     }
 
     public static function fake(string $method, string $path, array $headers = [], string $body = ''): self

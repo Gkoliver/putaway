@@ -1,3 +1,8 @@
 RewriteEngine On
+
+# Pass Authorization header to PHP when Apache strips it (common on cPanel/PHP-FPM).
+RewriteCond %{HTTP:Authorization} .
+RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteRule ^ index.php [L]
